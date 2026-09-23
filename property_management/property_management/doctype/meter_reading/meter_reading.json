@@ -1,0 +1,143 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "MR-.#####",
+ "creation": "2026-09-10 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "organization",
+  "property",
+  "unit",
+  "utility_type",
+  "reading_date",
+  "column_break_1",
+  "previous_reading",
+  "current_reading",
+  "consumption",
+  "rate_per_unit",
+  "billing_amount",
+  "reading_photo",
+  "captured_by"
+ ],
+ "fields": [
+  {
+   "fieldname": "organization",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Organization",
+   "options": "Organization",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Property",
+   "options": "Property",
+   "reqd": 1
+  },
+  {
+   "fieldname": "unit",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Property Unit",
+   "options": "Property Unit",
+   "reqd": 1
+  },
+  {
+   "default": "Water",
+   "fieldname": "utility_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Utility Type",
+   "options": "Water\nElectricity",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reading_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Reading Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "previous_reading",
+   "fieldtype": "Float",
+   "label": "Previous Reading",
+   "read_only": 1
+  },
+  {
+   "fieldname": "current_reading",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Current Meter Reading",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "consumption",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Consumption",
+   "read_only": 1
+  },
+  {
+   "default": "150",
+   "fieldname": "rate_per_unit",
+   "fieldtype": "Currency",
+   "label": "Rate Per Unit (KSh)",
+   "reqd": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "billing_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Billed Amount (KSh)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reading_photo",
+   "fieldtype": "Attach Image",
+   "label": "Meter Photo Proof"
+  },
+  {
+   "fieldname": "captured_by",
+   "fieldtype": "Link",
+   "label": "Captured By Caretaker",
+   "options": "User"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Property Management",
+ "name": "Meter Reading",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

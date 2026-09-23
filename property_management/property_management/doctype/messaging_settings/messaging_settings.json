@@ -1,0 +1,214 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:organization",
+ "creation": "2026-09-17 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "organization",
+  "section_sms",
+  "sms_enabled",
+  "sms_provider",
+  "sms_sender_id",
+  "column_break_sms",
+  "sms_api_key",
+  "sms_api_secret",
+  "sms_base_url",
+  "section_email",
+  "email_enabled",
+  "email_from_name",
+  "email_from_address",
+  "column_break_email",
+  "smtp_host",
+  "smtp_port",
+  "smtp_use_tls",
+  "smtp_username",
+  "smtp_password",
+  "section_whatsapp",
+  "whatsapp_enabled",
+  "whatsapp_provider",
+  "whatsapp_phone_number_id",
+  "column_break_wa",
+  "whatsapp_access_token",
+  "whatsapp_base_url"
+ ],
+ "fields": [
+  {
+   "fieldname": "organization",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Organization",
+   "options": "Organization",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "section_sms",
+   "fieldtype": "Section Break",
+   "label": "SMS Gateway"
+  },
+  {
+   "default": "0",
+   "fieldname": "sms_enabled",
+   "fieldtype": "Check",
+   "label": "SMS Enabled"
+  },
+  {
+   "default": "Africa's Talking",
+   "fieldname": "sms_provider",
+   "fieldtype": "Select",
+   "label": "SMS Provider",
+   "options": "Africa's Talking\nTwilio\nGeneric HTTP"
+  },
+  {
+   "fieldname": "sms_sender_id",
+   "fieldtype": "Data",
+   "label": "Sender ID / Shortcode"
+  },
+  {
+   "fieldname": "column_break_sms",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sms_api_key",
+   "fieldtype": "Data",
+   "label": "SMS API Key / Username"
+  },
+  {
+   "fieldname": "sms_api_secret",
+   "fieldtype": "Password",
+   "label": "SMS API Secret / Token"
+  },
+  {
+   "description": "Base API URL (for Generic HTTP / self-hosted gateways).",
+   "fieldname": "sms_base_url",
+   "fieldtype": "Data",
+   "label": "SMS Base URL"
+  },
+  {
+   "fieldname": "section_email",
+   "fieldtype": "Section Break",
+   "label": "Email (SMTP)"
+  },
+  {
+   "default": "0",
+   "fieldname": "email_enabled",
+   "fieldtype": "Check",
+   "label": "Email Enabled"
+  },
+  {
+   "fieldname": "email_from_name",
+   "fieldtype": "Data",
+   "label": "From Name"
+  },
+  {
+   "fieldname": "email_from_address",
+   "fieldtype": "Data",
+   "label": "From Email Address",
+   "options": "Email"
+  },
+  {
+   "fieldname": "column_break_email",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "smtp_host",
+   "fieldtype": "Data",
+   "label": "SMTP Host"
+  },
+  {
+   "default": "587",
+   "fieldname": "smtp_port",
+   "fieldtype": "Int",
+   "label": "SMTP Port"
+  },
+  {
+   "default": "1",
+   "fieldname": "smtp_use_tls",
+   "fieldtype": "Check",
+   "label": "Use TLS"
+  },
+  {
+   "fieldname": "smtp_username",
+   "fieldtype": "Data",
+   "label": "SMTP Username"
+  },
+  {
+   "fieldname": "smtp_password",
+   "fieldtype": "Password",
+   "label": "SMTP Password"
+  },
+  {
+   "fieldname": "section_whatsapp",
+   "fieldtype": "Section Break",
+   "label": "WhatsApp"
+  },
+  {
+   "default": "0",
+   "fieldname": "whatsapp_enabled",
+   "fieldtype": "Check",
+   "label": "WhatsApp Enabled"
+  },
+  {
+   "default": "Meta Cloud API",
+   "fieldname": "whatsapp_provider",
+   "fieldtype": "Select",
+   "label": "WhatsApp Provider",
+   "options": "Meta Cloud API\nTwilio\nGeneric HTTP"
+  },
+  {
+   "fieldname": "whatsapp_phone_number_id",
+   "fieldtype": "Data",
+   "label": "Phone Number ID / From"
+  },
+  {
+   "fieldname": "column_break_wa",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "whatsapp_access_token",
+   "fieldtype": "Password",
+   "label": "Access Token"
+  },
+  {
+   "description": "API base URL (e.g. https://graph.facebook.com/v19.0).",
+   "fieldname": "whatsapp_base_url",
+   "fieldtype": "Data",
+   "label": "WhatsApp Base URL"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-17 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Property Management",
+ "name": "Messaging Settings",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Organization Admin",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

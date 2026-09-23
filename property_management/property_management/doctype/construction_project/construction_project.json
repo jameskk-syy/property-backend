@@ -1,0 +1,130 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:project_name",
+ "creation": "2026-09-10 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "project_name",
+  "organization",
+  "property",
+  "status",
+  "column_break_1",
+  "start_date",
+  "expected_end_date",
+  "section_budget",
+  "total_budget",
+  "total_actual_spend",
+  "budget_variance",
+  "budget_account",
+  "budget_lines"
+ ],
+ "fields": [
+  {
+   "fieldname": "project_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Project Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "organization",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Organization",
+   "options": "Organization"
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Property",
+   "options": "Property"
+  },
+  {
+   "default": "In Progress",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Planning\nIn Progress\nCompleted\nOn Hold"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "label": "Start Date"
+  },
+  {
+   "fieldname": "expected_end_date",
+   "fieldtype": "Date",
+   "label": "Expected End Date"
+  },
+  {
+   "fieldname": "section_budget",
+   "fieldtype": "Section Break",
+   "label": "Budgeting & Expense Breakdown"
+  },
+  {
+   "fieldname": "total_budget",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Total Budget"
+  },
+  {
+   "fieldname": "total_actual_spend",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Total Actual Spend"
+  },
+  {
+   "fieldname": "budget_variance",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Budget Variance"
+  },
+  {
+   "fieldname": "budget_account",
+   "fieldtype": "Link",
+   "label": "Construction Budget Account",
+   "options": "Account",
+   "read_only": 1
+  },
+  {
+   "fieldname": "budget_lines",
+   "fieldtype": "Table",
+   "label": "Budget Lines",
+   "options": "Project Budget Line"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Property Management",
+ "name": "Construction Project",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

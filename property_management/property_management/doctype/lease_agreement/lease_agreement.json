@@ -1,0 +1,194 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "LEASE-.#####",
+ "creation": "2026-09-10 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "organization",
+  "property",
+  "unit",
+  "tenant",
+  "status",
+  "column_break_1",
+  "start_date",
+  "end_date",
+  "rent_amount",
+  "deposit_amount",
+  "signature_image",
+  "section_signatures",
+  "tenant_signature",
+  "caretaker_signature",
+  "signed_on",
+  "agreement_pdf",
+  "section_payment",
+  "initial_payment_status",
+  "initial_payment_reference",
+  "column_break_pay",
+  "initial_amount_due",
+  "initial_amount_paid"
+ ],
+ "fields": [
+  {
+   "fieldname": "organization",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Organization",
+   "options": "Organization",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "property",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Property",
+   "options": "Property",
+   "reqd": 1
+  },
+  {
+   "fieldname": "unit",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Property Unit",
+   "options": "Property Unit",
+   "reqd": 1
+  },
+  {
+   "fieldname": "tenant",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Tenant",
+   "options": "Property Tenant",
+   "reqd": 1
+  },
+  {
+   "default": "Active",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Active\nTerminated\nExpired",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "label": "Lease Start Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "label": "Lease End Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "rent_amount",
+   "fieldtype": "Currency",
+   "label": "Agreed Rent Amount (KSh)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "deposit_amount",
+   "fieldtype": "Currency",
+   "label": "Security Deposit Paid (KSh)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "signature_image",
+   "fieldtype": "Attach Image",
+   "label": "Digital Signature Image"
+  },
+  {
+   "fieldname": "section_signatures",
+   "fieldtype": "Section Break",
+   "label": "Digital Signatures"
+  },
+  {
+   "fieldname": "tenant_signature",
+   "fieldtype": "Long Text",
+   "label": "Tenant Signature (data URL)"
+  },
+  {
+   "fieldname": "caretaker_signature",
+   "fieldtype": "Long Text",
+   "label": "Caretaker Signature (data URL)"
+  },
+  {
+   "fieldname": "signed_on",
+   "fieldtype": "Datetime",
+   "label": "Signed On"
+  },
+  {
+   "fieldname": "agreement_pdf",
+   "fieldtype": "Attach",
+   "label": "Signed Agreement (PDF)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_payment",
+   "fieldtype": "Section Break",
+   "label": "Initial Payment (Rent + Deposit)"
+  },
+  {
+   "default": "Pending",
+   "fieldname": "initial_payment_status",
+   "fieldtype": "Select",
+   "label": "Initial Payment Status",
+   "options": "Pending\nInitiated\nPaid\nFailed"
+  },
+  {
+   "fieldname": "initial_payment_reference",
+   "fieldtype": "Data",
+   "label": "M-Pesa Reference",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_pay",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "initial_amount_due",
+   "fieldtype": "Currency",
+   "label": "Initial Amount Due (Rent + Deposit)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "initial_amount_paid",
+   "fieldtype": "Currency",
+   "label": "Initial Amount Paid",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Property Management",
+ "name": "Lease Agreement",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

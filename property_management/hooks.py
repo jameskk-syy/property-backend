@@ -5,251 +5,113 @@ app_description = "Multi-Tenant Property Management System with per-apartment ac
 app_email = "admin@dadisestates.com"
 app_license = "mit"
 
-# Apps
-# ------------------
-
-# required_apps = []
-
-# Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "property_management",
-# 		"logo": "/assets/property_management/logo.png",
-# 		"title": "Property Management",
-# 		"route": "/property_management",
-# 		"has_permission": "property_management.api.permission.has_app_permission"
-# 	}
-# ]
-
-# Includes in <head>
-# ------------------
-
-# include js, css files in header of desk.html
-# app_include_css = "/assets/property_management/css/property_management.css"
-# app_include_js = "/assets/property_management/js/property_management.js"
-
-# include js, css files in header of web template
-# web_include_css = "/assets/property_management/css/property_management.css"
-# web_include_js = "/assets/property_management/js/property_management.js"
-
-# include custom scss in every website theme (without file extension ".scss")
-# website_theme_scss = "property_management/public/scss/website"
-
-# include js, css files in header of web form
-# webform_include_js = {"doctype": "public/js/doctype.js"}
-# webform_include_css = {"doctype": "public/css/doctype.css"}
-
-# include js in page
-# page_js = {"page" : "public/js/file.js"}
-
-# include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
-# doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
-# doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
-# doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
-
-# Svg Icons
-# ------------------
-# include app icons in desk
-# app_include_icons = "property_management/public/icons.svg"
-
-# Home Pages
-# ----------
-
-# application home page (will override Website Settings)
-# home_page = "login"
-
-# website user home page (by Role)
-# role_home_page = {
-# 	"Role": "home_page"
-# }
-
-# Generators
-# ----------
-
-# automatically create page for each record of this doctype
-# website_generators = ["Web Page"]
-
-# Jinja
-# ----------
-
-# add methods and filters to jinja environment
-# jinja = {
-# 	"methods": "property_management.utils.jinja_methods",
-# 	"filters": "property_management.utils.jinja_filters"
-# }
-
-# Installation
-# ------------
-
-# before_install = "property_management.install.before_install"
-# after_install = "property_management.install.after_install"
-
-# Uninstallation
-# ------------
-
-# before_uninstall = "property_management.uninstall.before_uninstall"
-# after_uninstall = "property_management.uninstall.after_uninstall"
-
-# Integration Setup
-# ------------------
-# To set up dependencies/integrations with other apps
-# Name of the app being installed is passed as an argument
-
-# before_app_install = "property_management.utils.before_app_install"
-# after_app_install = "property_management.utils.after_app_install"
-
-# Integration Cleanup
-# -------------------
-# To clean up dependencies/integrations with other apps
-# Name of the app being uninstalled is passed as an argument
-
-# before_app_uninstall = "property_management.utils.before_app_uninstall"
-# after_app_uninstall = "property_management.utils.after_app_uninstall"
-
-# Desk Notifications
-# ------------------
-# See frappe.core.notifications.get_notification_config
-
-# notification_config = "property_management.notifications.get_notification_config"
-
-# Awesome Bar
-# -----------
-# Extra search results: list of dicts with label, description, route, index.
-# route: ["List", "ToDo"], "/desk/docs/some/page", or "https://example.com"
-# awesomebar_search = ["property_management.search.awesomebar_results"]
-
 # Permissions
 # -----------
-# Permissions evaluated in scripted ways
-
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
-# has_permission = {
-# 	"Event": "frappe.desk.doctype.event.event.has_permission",
-# }
-
-# DocType Class
-# ---------------
-# Override standard doctype classes
-
-# override_doctype_class = {
-# 	"ToDo": "custom_app.overrides.CustomToDo"
-# }
+permission_query_conditions = {
+	"Property": "property_management.permission.get_permission_query_conditions",
+	"Property Unit": "property_management.permission.get_permission_query_conditions",
+	"Property Tenant": "property_management.permission.get_permission_query_conditions",
+	"Lease Agreement": "property_management.permission.get_permission_query_conditions",
+	"Property Invoice": "property_management.permission.get_permission_query_conditions",
+	"Property Payment": "property_management.permission.get_permission_query_conditions",
+	"Meter Reading": "property_management.permission.get_permission_query_conditions",
+	"WhatsApp Message Log": "property_management.permission.get_permission_query_conditions",
+	"Module Def": "property_management.permission.get_permission_query_conditions",
+	"Module Permission": "property_management.permission.get_permission_query_conditions",
+	"User Property Assignment": "property_management.permission.get_permission_query_conditions",
+	"Audit Log": "property_management.permission.get_permission_query_conditions",
+	"Expense Vendor": "property_management.permission.get_permission_query_conditions",
+	"Property Expense": "property_management.permission.get_permission_query_conditions",
+	"Employee": "property_management.permission.get_permission_query_conditions",
+	"Tax Template": "property_management.permission.get_permission_query_conditions",
+	"Payroll Run": "property_management.permission.get_permission_query_conditions",
+	"Payroll Item": "property_management.permission.get_permission_query_conditions",
+	"Construction Project": "property_management.permission.get_permission_query_conditions",
+	"Project Task": "property_management.permission.get_permission_query_conditions",
+	"Construction Purchase": "property_management.permission.get_permission_query_conditions",
+	"Ledger Account": "property_management.permission.get_permission_query_conditions",
+	"Journal Entry": "property_management.permission.get_permission_query_conditions",
+	"Bank Account": "property_management.permission.get_permission_query_conditions",
+	"Bank Transaction": "property_management.permission.get_permission_query_conditions",
+	"Approval Request": "property_management.permission.get_permission_query_conditions",
+	"Prospective Tenant": "property_management.permission.get_permission_query_conditions",
+	"Viewing Request": "property_management.permission.get_permission_query_conditions",
+	"Contact Access Transaction": "property_management.permission.get_permission_query_conditions",
+	"Tenant Complaint": "property_management.permission.get_permission_query_conditions",
+	"Held Tenant Item": "property_management.permission.get_permission_query_conditions",
+}
 
 # Document Events
 # ---------------
-# Hook on document methods and events
-
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+	"*": {
+		"before_validate": "property_management.permission.set_default_organization",
+		"before_insert": "property_management.permission.set_default_organization",
+		"after_insert": "property_management.audit.capture_audit_log",
+		"on_update": "property_management.audit.capture_audit_log",
+		"on_trash": "property_management.audit.capture_audit_log",
+	},
+	# Kenyan statutory deductions computed in Python (HRMS safe_eval lacks min/max).
+	"Salary Slip": {
+		"validate": "property_management.integration.payroll_setup.apply_statutory_deductions",
+	},
+}
 
 # Scheduled Tasks
 # ---------------
+scheduler_events = {
+	"daily": [
+		"property_management.tasks.daily"
+	],
+	"monthly": [
+		"property_management.tasks.monthly"
+	]
+}
 
-# scheduler_events = {
-# 	"all": [
-# 		"property_management.tasks.all"
-# 	],
-# 	"daily": [
-# 		"property_management.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"property_management.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"property_management.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"property_management.tasks.monthly"
-# 	],
-# }
+# Fixtures
+# --------
+# Committed with the app and imported on every `bench migrate`, so the app's
+# roles and integration custom fields are never lost on a reinstall.
+fixtures = [
+	{
+		"dt": "Role",
+		"filters": [["name", "in", ["Caretaker", "Landlord", "Tenant",
+									 "Organization Admin", "Director", "Office User"]]],
+	},
+	# Granular access-module catalog (Module Def per key) owned by this app.
+	{"dt": "Module Def", "filters": [["app_name", "=", "property_management"]]},
+	{
+		"dt": "Custom Field",
+		"filters": [["name", "in", [
+			"Property Invoice-sales_invoice",
+			"Property Expense-purchase_invoice",
+			"Construction Purchase-purchase_invoice",
+			"Construction Project-erpnext_project",
+			"Property Payment-payment_entry",
+			"Organization-erpnext_company",
+			"Property-cost_center",
+			"Sales Invoice-property_ref", "Sales Invoice-property_invoice_ref",
+			"Payment Entry-property_ref",
+			"Purchase Invoice-property_ref", "Purchase Invoice-property_expense_ref",
+			"Employee-property_ref", "Employee-organization_ref",
+			"Employee-gross_salary", "Employee-mpesa_phone",
+			"Project-property_ref", "Project-construction_project_ref",
+		]]],
+	},
+]
 
-# Testing
-# -------
+# Install / Migrate hooks
+# -----------------------
+# On fresh install: seed the admin-side access modules + role permissions AND
+# create the integration custom fields on native ERPNext/HRMS doctypes (which
+# exist by the time this app installs, since it depends on erpnext/hrms).
+after_install = [
+	"property_management.install.setup_site",
+]
 
-# before_tests = "property_management.install.before_tests"
-
-# Overriding Methods
-# ------------------------------
-#
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "property_management.event.get_events"
-# }
-#
-# each overriding function accepts a `data` argument;
-# generated from the base implementation of the doctype dashboard,
-# along with any modifications made in other Frappe apps
-# override_doctype_dashboards = {
-# 	"Task": "property_management.task.get_dashboard_data"
-# }
-
-# exempt linked doctypes from being automatically cancelled
-#
-# auto_cancel_exempted_doctypes = ["Auto Repeat"]
-
-# Ignore links to specified DocTypes when deleting documents
-# -----------------------------------------------------------
-
-# ignore_links_on_delete = ["Communication", "ToDo"]
-
-# Request Events
-# ----------------
-# before_request = ["property_management.utils.before_request"]
-# after_request = ["property_management.utils.after_request"]
-
-# Job Events
-# ----------
-# before_job = ["property_management.utils.before_job"]
-# after_job = ["property_management.utils.after_job"]
-
-# User Data Protection
-# --------------------
-
-# user_data_fields = [
-# 	{
-# 		"doctype": "{doctype_1}",
-# 		"filter_by": "{filter_by}",
-# 		"redact_fields": ["{field_1}", "{field_2}"],
-# 		"partial": 1,
-# 	},
-# 	{
-# 		"doctype": "{doctype_2}",
-# 		"filter_by": "{filter_by}",
-# 		"partial": 1,
-# 	},
-# 	{
-# 		"doctype": "{doctype_3}",
-# 		"strict": False,
-# 	},
-# 	{
-# 		"doctype": "{doctype_4}"
-# 	}
-# ]
-
-# Authentication and authorization
-# --------------------------------
-
-# auth_hooks = [
-# 	"property_management.auth.validate"
-# ]
-
-# Automatically update python controller files with type annotations for this app.
-# export_python_type_annotations = True
-
-# default_log_clearing_doctypes = {
-# 	"Logging DocType Name": 30  # days to retain logs
-# }
-
-# Translation
-# ------------
-# List of apps whose translatable strings should be excluded from this app's translations.
-# ignore_translatable_strings_from = []
-
+# On migrate/reinstall: create ERPNext/HRMS integration custom fields AND
+# re-seed the access modules (both idempotent).
+after_migrate = [
+	"property_management.integration.custom_fields.setup_integration_custom_fields",
+	"property_management.setup.seed_access_modules",
+]

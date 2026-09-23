@@ -1,0 +1,274 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:property_code",
+ "creation": "2026-09-10 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "organization",
+  "property_code",
+  "property_name",
+  "property_type",
+  "status",
+  "column_break_1",
+  "landlord",
+  "caretaker",
+  "address",
+  "county",
+  "sub_county",
+  "cover_image",
+  "section_details",
+  "year_built",
+  "total_units",
+  "floors",
+  "column_break_details",
+  "description",
+  "amenities",
+  "section_billing_override",
+  "rent_due_day",
+  "late_fee_amount",
+  "second_penalty_amount",
+  "column_break_billing_override",
+  "garbage_charge",
+  "water_rate_per_unit",
+  "section_images",
+  "images",
+  "section_accounting",
+  "account_group",
+  "receivables_account",
+  "rent_income_account",
+  "column_break_accounting",
+  "utility_income_account",
+  "expense_account",
+  "collection_account"
+ ],
+ "fields": [
+  {
+   "fieldname": "organization",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Organization",
+   "options": "Organization",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "property_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Property Code",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "property_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Property Name",
+   "reqd": 1
+  },
+  {
+   "default": "Residential",
+   "fieldname": "property_type",
+   "fieldtype": "Select",
+   "label": "Property Type",
+   "options": "Residential\nCommercial\nMixed Use",
+   "reqd": 1
+  },
+  {
+   "default": "Active",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Active\nInactive\nUnder Construction",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "landlord",
+   "fieldtype": "Link",
+   "label": "Landlord",
+   "options": "Landlord"
+  },
+  {
+   "fieldname": "caretaker",
+   "fieldtype": "Link",
+   "label": "Assigned Caretaker",
+   "options": "Caretaker"
+  },
+  {
+   "fieldname": "address",
+   "fieldtype": "Small Text",
+   "label": "Address / Location"
+  },
+  {
+   "fieldname": "county",
+   "fieldtype": "Data",
+   "label": "County"
+  },
+  {
+   "fieldname": "sub_county",
+   "fieldtype": "Data",
+   "label": "Sub-County"
+  },
+  {
+   "fieldname": "cover_image",
+   "fieldtype": "Attach Image",
+   "label": "Cover Image"
+  },
+  {
+   "fieldname": "section_details",
+   "fieldtype": "Section Break",
+   "label": "Property Details"
+  },
+  {
+   "fieldname": "year_built",
+   "fieldtype": "Int",
+   "label": "Year of Construction"
+  },
+  {
+   "fieldname": "total_units",
+   "fieldtype": "Int",
+   "label": "Number of Units"
+  },
+  {
+   "fieldname": "floors",
+   "fieldtype": "Int",
+   "label": "Number of Floors"
+  },
+  {
+   "fieldname": "column_break_details",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Property Description"
+  },
+  {
+   "fieldname": "amenities",
+   "fieldtype": "Small Text",
+   "label": "Amenities Available"
+  },
+  {
+   "fieldname": "section_billing_override",
+   "fieldtype": "Section Break",
+   "label": "Rent Billing Overrides (optional)"
+  },
+  {
+   "fieldname": "rent_due_day",
+   "fieldtype": "Int",
+   "label": "Rent Due Day of Month (override)"
+  },
+  {
+   "fieldname": "late_fee_amount",
+   "fieldtype": "Currency",
+   "label": "Late Fee Amount (override)"
+  },
+  {
+   "fieldname": "second_penalty_amount",
+   "fieldtype": "Currency",
+   "label": "Second Penalty Amount (override)"
+  },
+  {
+   "fieldname": "column_break_billing_override",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "garbage_charge",
+   "fieldtype": "Currency",
+   "label": "Garbage Charge (override, KSh/month)"
+  },
+  {
+   "fieldname": "water_rate_per_unit",
+   "fieldtype": "Currency",
+   "label": "Water Rate (override, KSh/unit)"
+  },
+  {
+   "fieldname": "section_images",
+   "fieldtype": "Section Break",
+   "label": "Property Images"
+  },
+  {
+   "fieldname": "images",
+   "fieldtype": "Table",
+   "label": "Images",
+   "options": "Property Image"
+  },
+  {
+   "fieldname": "section_accounting",
+   "fieldtype": "Section Break",
+   "label": "Isolated Financial Ledger Accounts (Per-Apartment)"
+  },
+  {
+   "fieldname": "account_group",
+   "fieldtype": "Data",
+   "label": "Property Account Group",
+   "read_only": 1
+  },
+  {
+   "fieldname": "receivables_account",
+   "fieldtype": "Data",
+   "label": "Debtors / Receivables Account",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rent_income_account",
+   "fieldtype": "Data",
+   "label": "Rent Income Account",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_accounting",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "utility_income_account",
+   "fieldtype": "Data",
+   "label": "Utility Income Account",
+   "read_only": 1
+  },
+  {
+   "fieldname": "expense_account",
+   "fieldtype": "Data",
+   "label": "Expense Account",
+   "read_only": 1
+  },
+  {
+   "fieldname": "collection_account",
+   "fieldtype": "Data",
+   "label": "Bank / M-Pesa Collection Account",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Property Management",
+ "name": "Property",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

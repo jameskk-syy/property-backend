@@ -1,0 +1,116 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "autoincrement",
+ "creation": "2026-09-10 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "payroll_run",
+  "employee",
+  "employee_name",
+  "gross_salary",
+  "column_break_1",
+  "total_deductions",
+  "net_salary",
+  "payment_status",
+  "mpesa_transaction_id",
+  "section_deductions",
+  "deductions"
+ ],
+ "fields": [
+  {
+   "fieldname": "payroll_run",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Payroll Run",
+   "options": "Payroll Run"
+  },
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name"
+  },
+  {
+   "fieldname": "gross_salary",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Gross Salary",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_deductions",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Total Deductions"
+  },
+  {
+   "fieldname": "net_salary",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Net Salary"
+  },
+  {
+   "default": "Pending",
+   "fieldname": "payment_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Payment Status",
+   "options": "Pending\nPaid"
+  },
+  {
+   "fieldname": "mpesa_transaction_id",
+   "fieldtype": "Data",
+   "label": "M-Pesa Transaction ID"
+  },
+  {
+   "fieldname": "section_deductions",
+   "fieldtype": "Section Break",
+   "label": "Statutory Deductions Breakdown"
+  },
+  {
+   "fieldname": "deductions",
+   "fieldtype": "Table",
+   "label": "Deductions",
+   "options": "Payroll Deduction"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Property Management",
+ "name": "Payroll Item",
+ "naming_rule": "Autoincrement",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

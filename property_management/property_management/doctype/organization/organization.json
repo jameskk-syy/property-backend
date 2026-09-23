@@ -1,0 +1,200 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:organization_name",
+ "creation": "2026-09-10 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "organization_name",
+  "company_registration_number",
+  "status",
+  "column_break_1",
+  "email",
+  "phone",
+  "section_billing",
+  "rent_due_day",
+  "late_fee_grace_days",
+  "late_fee_amount",
+  "column_break_billing",
+  "second_penalty_days",
+  "second_penalty_amount",
+  "section_charges",
+  "garbage_charge",
+  "column_break_charges",
+  "water_rate_per_unit",
+  "section_portal",
+  "portal_url",
+  "section_mpesa",
+  "mpesa_paybill_number",
+  "mpesa_consumer_key",
+  "column_break_mpesa",
+  "mpesa_consumer_secret",
+  "mpesa_passkey"
+ ],
+ "fields": [
+  {
+   "fieldname": "organization_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Organization Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "company_registration_number",
+   "fieldtype": "Data",
+   "label": "Registration Number"
+  },
+  {
+   "default": "Active",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Active\nSuspended\nTrial",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "email",
+   "fieldtype": "Data",
+   "label": "Email Address",
+   "options": "Email"
+  },
+  {
+   "fieldname": "phone",
+   "fieldtype": "Data",
+   "label": "Phone Number"
+  },
+  {
+   "fieldname": "section_billing",
+   "fieldtype": "Section Break",
+   "label": "Rent Billing & Deadlines"
+  },
+  {
+   "default": "5",
+   "fieldname": "rent_due_day",
+   "fieldtype": "Int",
+   "label": "Rent Due Day of Month"
+  },
+  {
+   "default": "0",
+   "fieldname": "late_fee_grace_days",
+   "fieldtype": "Int",
+   "label": "Late Fee Grace Days (after due day)"
+  },
+  {
+   "default": "500",
+   "fieldname": "late_fee_amount",
+   "fieldtype": "Currency",
+   "label": "Late Fee Amount (KSh)"
+  },
+  {
+   "fieldname": "column_break_billing",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "10",
+   "fieldname": "second_penalty_days",
+   "fieldtype": "Int",
+   "label": "Second Penalty After (days from due day)"
+  },
+  {
+   "default": "1000",
+   "fieldname": "second_penalty_amount",
+   "fieldtype": "Currency",
+   "label": "Second Penalty Amount (KSh)"
+  },
+  {
+   "fieldname": "section_charges",
+   "fieldtype": "Section Break",
+   "label": "Standing Monthly Charges"
+  },
+  {
+   "default": "0",
+   "fieldname": "garbage_charge",
+   "fieldtype": "Currency",
+   "label": "Garbage Charge (KSh / month)"
+  },
+  {
+   "fieldname": "column_break_charges",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "150",
+   "fieldname": "water_rate_per_unit",
+   "fieldtype": "Currency",
+   "label": "Water Rate (KSh / unit)"
+  },
+  {
+   "fieldname": "section_portal",
+   "fieldtype": "Section Break",
+   "label": "Tenant Portal"
+  },
+  {
+   "default": "http://localhost:5173",
+   "description": "Base URL of the tenant web app, used to build the 'Pay' link in reminders (e.g. https://portal.dadis.co.ke).",
+   "fieldname": "portal_url",
+   "fieldtype": "Data",
+   "label": "Tenant Portal URL"
+  },
+  {
+   "fieldname": "section_mpesa",
+   "fieldtype": "Section Break",
+   "label": "M-Pesa Integration Credentials"
+  },
+  {
+   "fieldname": "mpesa_paybill_number",
+   "fieldtype": "Data",
+   "label": "Paybill / Shortcode"
+  },
+  {
+   "fieldname": "mpesa_consumer_key",
+   "fieldtype": "Data",
+   "label": "M-Pesa Consumer Key"
+  },
+  {
+   "fieldname": "column_break_mpesa",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "mpesa_consumer_secret",
+   "fieldtype": "Password",
+   "label": "M-Pesa Consumer Secret"
+  },
+  {
+   "fieldname": "mpesa_passkey",
+   "fieldtype": "Password",
+   "label": "M-Pesa Passkey"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Property Management",
+ "name": "Organization",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

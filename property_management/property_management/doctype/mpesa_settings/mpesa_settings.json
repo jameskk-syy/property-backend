@@ -1,0 +1,162 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:organization",
+ "creation": "2026-09-15 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "organization",
+  "enabled",
+  "environment",
+  "column_break_1",
+  "shortcode",
+  "paybill_number",
+  "section_api",
+  "consumer_key",
+  "consumer_secret",
+  "column_break_api",
+  "passkey",
+  "section_b2c",
+  "initiator_name",
+  "security_credential",
+  "column_break_b2c",
+  "b2c_shortcode",
+  "section_callback",
+  "callback_base_url"
+ ],
+ "fields": [
+  {
+   "fieldname": "organization",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Organization",
+   "options": "Organization",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "default": "sandbox",
+   "fieldname": "environment",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Environment",
+   "options": "sandbox\nproduction"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Lipa Na M-Pesa Online shortcode (STK push). For sandbox this is typically 174379.",
+   "fieldname": "shortcode",
+   "fieldtype": "Data",
+   "label": "STK Shortcode"
+  },
+  {
+   "description": "Customer-facing Paybill / Till used as the account reference display.",
+   "fieldname": "paybill_number",
+   "fieldtype": "Data",
+   "label": "Paybill / Till Number"
+  },
+  {
+   "fieldname": "section_api",
+   "fieldtype": "Section Break",
+   "label": "Daraja API Credentials"
+  },
+  {
+   "fieldname": "consumer_key",
+   "fieldtype": "Data",
+   "label": "Consumer Key"
+  },
+  {
+   "fieldname": "consumer_secret",
+   "fieldtype": "Password",
+   "label": "Consumer Secret"
+  },
+  {
+   "fieldname": "column_break_api",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "passkey",
+   "fieldtype": "Password",
+   "label": "Lipa Na M-Pesa Passkey"
+  },
+  {
+   "fieldname": "section_b2c",
+   "fieldtype": "Section Break",
+   "label": "B2C (Disbursements) - optional"
+  },
+  {
+   "fieldname": "initiator_name",
+   "fieldtype": "Data",
+   "label": "Initiator Name"
+  },
+  {
+   "fieldname": "security_credential",
+   "fieldtype": "Password",
+   "label": "Security Credential"
+  },
+  {
+   "fieldname": "column_break_b2c",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "b2c_shortcode",
+   "fieldtype": "Data",
+   "label": "B2C Shortcode"
+  },
+  {
+   "fieldname": "section_callback",
+   "fieldtype": "Section Break",
+   "label": "Callback"
+  },
+  {
+   "description": "Public HTTPS base URL that Safaricom can reach (e.g. your ngrok URL: https://xxxx.ngrok-free.app). The callback path is appended automatically.",
+   "fieldname": "callback_base_url",
+   "fieldtype": "Data",
+   "label": "Callback Base URL"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-15 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Property Management",
+ "name": "Mpesa Settings",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Organization Admin",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
