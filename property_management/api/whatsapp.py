@@ -155,6 +155,56 @@ def _send_to_waclient(instance_id, access_token, phone, message, base_url=None):
     return data
 
 
+def _send_to_waclient_template(instance_id, access_token, phone, template_name, language, components, base_url=None):
+    """
+    Send a template message via WAClient API.
+    https://api.waclient.com/send
+    
+    Args:
+        template_name: Name of approved template (e.g. "hello_world")
+        language: Language code (e.g. "en_US", "en")
+        components: List of template components with parameters (optional)
+    
+    Returns the API response dict.
+    """
+    import requests
+    
+    base = (base_url or "https://api.waclient.com").rstrip("/")
+    url = f"{base}/send"
+    
+    # Build template payload for WAClient (Meta Cloud API format)
+    template_payload = {
+        "name": template_name,
+        "language": {"code": language}
+    }
+    
+    if components:
+        template_payload["components"] = components
+    
+    payload = {
+        "number": phone,
+        "type": "template",
+        "template": template_payload,
+        "instance_id": instance_id,
+        "access_token": access_token
+    }
+    
+    headers = {"Content-Type": "application/json"}
+    
+    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"raw_response": resp.text}
+    
+    if resp.status_code >= 400:
+        error_msg = data.get("message", data.get("error", resp.text))
+        raise Exception(f"WAClient API error: {error_msg}")
+    
+    return data
+
+
 def _send_to_waclient_buttons(instance_id, access_token, phone, caption, footer, buttons, base_url=None):
     """
     Send a button message via WAClient API.
@@ -331,18 +381,19 @@ def send_text_message(phone, message, organization=None):
         raise
 
 
-def send_template_message(phone, template_name, language_code, components, organization=None):
+def send_template_message(phone, template_name, language_code, components=None, organization=None):
     """
-    Send a template message via WhatsApp Cloud API.
+    Send a template message via WhatsApp.
+    Supports both WAClient and Meta Cloud API.
     
     Templates must be pre-approved by Meta. Use this for proactive messages
     outside the 24-hour window (rent reminders, overdue notices).
     
     Args:
         phone: Recipient phone number
-        template_name: Name of approved template (e.g. "rent_reminder")
+        template_name: Name of approved template (e.g. "hello_world", "rent_reminder")
         language_code: Template language (e.g. "en", "en_US")
-        components: List of template components with parameters
+        components: List of template components with parameters (optional)
         organization: Organization name
     
     Returns:
@@ -357,35 +408,63 @@ def send_template_message(phone, template_name, language_code, components, organ
         _log_message(organization, phone, "template", content, template_name=template_name, status="Sent")
         return {"status": "logged", "message": "WhatsApp not configured, message logged only"}
     
-    if not (doc.get("whatsapp_phone_number_id") and token):
-        raise frappe.ValidationError("WhatsApp credentials incomplete")
-    
     phone_normalized = _normalize_phone(phone)
-    
-    payload = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": phone_normalized,
-        "type": "template",
-        "template": {
-            "name": template_name,
-            "language": {"code": language_code},
-            "components": components or []
-        }
-    }
+    provider = doc.get("whatsapp_provider", "").strip()
     
     try:
-        resp = _send_to_meta(
-            doc.get("whatsapp_phone_number_id"),
-            token,
-            payload,
-            doc.get("whatsapp_base_url")
-        )
-        wamid = resp.get("messages", [{}])[0].get("id")
-        content = f"Template: {template_name}"
-        _log_message(organization, phone, "template", content, template_name=template_name,
-                     status="Sent", wamid=wamid)
-        return {"status": "sent", "message_id": wamid}
+        # Use WAClient API
+        if provider == "WAClient":
+            instance_id = doc.get("whatsapp_instance_id")
+            if not (instance_id and token):
+                raise frappe.ValidationError("WAClient credentials incomplete")
+            
+            resp = _send_to_waclient_template(
+                instance_id=instance_id,
+                access_token=token,
+                phone=phone_normalized,
+                template_name=template_name,
+                language=language_code,
+                components=components,
+                base_url=doc.get("whatsapp_base_url")
+            )
+            wamid = resp.get("id") or resp.get("message_id") or resp.get("msgId")
+            if not wamid:
+                # Try to get from nested message_payload
+                wamid = resp.get("message_payload", {}).get("messages", [{}])[0].get("id")
+            content = f"Template: {template_name}"
+            _log_message(organization, phone, "template", content, template_name=template_name,
+                         status="Sent", wamid=wamid)
+            return {"status": "sent", "message_id": wamid, "response": resp}
+        
+        # Use Meta Cloud API (direct)
+        else:
+            if not (doc.get("whatsapp_phone_number_id") and token):
+                raise frappe.ValidationError("WhatsApp credentials incomplete")
+            
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": phone_normalized,
+                "type": "template",
+                "template": {
+                    "name": template_name,
+                    "language": {"code": language_code},
+                    "components": components or []
+                }
+            }
+            
+            resp = _send_to_meta(
+                doc.get("whatsapp_phone_number_id"),
+                token,
+                payload,
+                doc.get("whatsapp_base_url")
+            )
+            wamid = resp.get("messages", [{}])[0].get("id")
+            content = f"Template: {template_name}"
+            _log_message(organization, phone, "template", content, template_name=template_name,
+                         status="Sent", wamid=wamid)
+            return {"status": "sent", "message_id": wamid}
+    
     except Exception as e:
         _log_message(organization, phone, "template", f"Template: {template_name}",
                      template_name=template_name, status="Failed", error=str(e))
