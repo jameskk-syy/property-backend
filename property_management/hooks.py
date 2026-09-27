@@ -55,6 +55,10 @@ doc_events = {
 	"Salary Slip": {
 		"validate": "property_management.integration.payroll_setup.apply_statutory_deductions",
 	},
+	# Ensure phone numbers are unique across users
+	"User": {
+		"validate": "property_management.validation.validate_unique_phone",
+	},
 }
 
 # Scheduled Tasks

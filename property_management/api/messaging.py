@@ -10,8 +10,7 @@ fans out to several channels in one call and returns which succeeded/failed.
 
 - Email uses Frappe's built-in mailer (frappe.sendmail).
 - SMS uses Frappe's SMS Settings gateway (frappe.core...send_sms) if configured.
-- WhatsApp records a WhatsApp Message Log entry (integrate a provider in
-  `_dispatch_whatsapp` when credentials are available).
+- WhatsApp uses the Cloud API via property_management.api.whatsapp module.
 
 All endpoints return the v2 envelope {status, data, message}.
 """
@@ -46,21 +45,6 @@ def _secret(doc, field):
 		return doc.get_password(field, raise_exception=False)
 	except Exception:
 		return None
-
-
-def _log_whatsapp(phone, message, organization, status="Sent", error=None):
-	try:
-		frappe.get_doc({
-			"doctype": "WhatsApp Message Log",
-			"organization": organization,
-			"recipient_phone": phone or "",
-			"template_name": "adhoc_message",
-			"message_content": message,
-			"status": status,
-			"error_log": error,
-		}).insert(ignore_permissions=True)
-	except Exception:
-		frappe.log_error(title="whatsapp log failed", message=frappe.get_traceback())
 
 
 def _dispatch_sms(phone, message, organization=None):
@@ -113,38 +97,45 @@ def _dispatch_email(email, message, subject="Notification from your Property Man
 
 def _dispatch_whatsapp(phone, message, organization):
 	"""
-	Send a WhatsApp message via the org's Meta Cloud API credentials when
-	configured; always logs the attempt. Falls back to just logging when no
-	provider is set up, so the reminder flow works end-to-end.
+	Send a WhatsApp text message via the Cloud API.
+	Uses the centralized whatsapp module for actual sending and logging.
 	"""
 	if not phone:
 		raise frappe.ValidationError("Recipient phone number is required for WhatsApp")
 
-	doc = _messaging_doc(organization)
-	token = _secret(doc, "whatsapp_access_token") if doc else None
-	if doc and doc.get("whatsapp_enabled") and (doc.get("whatsapp_provider") == "Meta Cloud API") \
-			and doc.get("whatsapp_phone_number_id") and token:
-		try:
-			import requests
-			base = (doc.get("whatsapp_base_url") or "https://graph.facebook.com/v19.0").rstrip("/")
-			resp = requests.post(
-				f"{base}/{doc.get('whatsapp_phone_number_id')}/messages",
-				headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-				data=json.dumps({
-					"messaging_product": "whatsapp", "to": phone,
-					"type": "text", "text": {"body": message},
-				}),
-				timeout=20,
-			)
-			resp.raise_for_status()
-			_log_whatsapp(phone, message, organization, status="Sent")
-			return
-		except Exception as e:
-			_log_whatsapp(phone, message, organization, status="Failed", error=str(e))
-			raise
+	from property_management.api.whatsapp import send_text_message
+	send_text_message(phone, message, organization)
 
-	# No provider configured: log the send so the flow is traceable.
-	_log_whatsapp(phone, message, organization, status="Sent")
+
+def _dispatch_whatsapp_with_buttons(phone, message, buttons, organization, header=None, footer=None,
+                                    ref_doctype=None, ref_name=None):
+	"""
+	Send a WhatsApp interactive button message.
+	
+	Args:
+		phone: Recipient phone number
+		message: Main message body
+		buttons: List of button dicts [{"id": "btn_id", "title": "Button Text"}]
+		organization: Organization name
+		header: Optional header text
+		footer: Optional footer text
+		ref_doctype: Reference document type for tracking
+		ref_name: Reference document name
+	"""
+	if not phone:
+		raise frappe.ValidationError("Recipient phone number is required for WhatsApp")
+
+	from property_management.api.whatsapp import send_interactive_buttons
+	send_interactive_buttons(
+		phone=phone,
+		header_text=header,
+		body_text=message,
+		buttons=buttons,
+		organization=organization,
+		footer_text=footer,
+		ref_doctype=ref_doctype,
+		ref_name=ref_name
+	)
 
 
 # --------------------------------------------------------------------------
@@ -213,3 +204,170 @@ def send_reminder(message, channels, tenant=None, phone=None, email=None,
 			failed.append({"channel": channel, "error": str(e)})
 
 	return {"sent": sent, "failed": failed}
+
+
+# --------------------------------------------------------------------------
+# WhatsApp with Pay Button endpoints
+# --------------------------------------------------------------------------
+
+@frappe.whitelist()
+@envelope
+def send_whatsapp_with_pay_button(message, phone=None, invoice=None, tenant=None,
+                                   header=None, footer=None, organization=None, **kwargs):
+	"""
+	Send a WhatsApp message with a "Pay Now" button linked to an invoice.
+	
+	Args:
+		message: Main message body
+		phone: Recipient phone (or resolved from tenant)
+		invoice: Invoice ID (Property Invoice or Sales Invoice)
+		tenant: Tenant name (to look up phone if not provided)
+		header: Optional header text
+		footer: Optional footer text (default: "Nest Property Management")
+		organization: Organization name
+	
+	Returns:
+		{channel: "whatsapp", phone, invoice, buttons}
+	"""
+	organization = resolve_organization(explicit=organization)
+	
+	# Resolve phone from tenant if not provided
+	if not phone and tenant:
+		phone = frappe.db.get_value("Property Tenant", tenant, "phone")
+	
+	if not phone:
+		raise frappe.ValidationError("Recipient phone number is required")
+	
+	if not invoice:
+		raise frappe.ValidationError("Invoice ID is required for Pay button")
+	
+	# Build buttons
+	buttons = [
+		{"id": f"pay_stk_{invoice}", "title": "Pay Now"},
+		{"id": "contact_support", "title": "Contact Support"}
+	]
+	
+	# Determine reference doctype
+	ref_doctype = "Sales Invoice" if frappe.db.exists("Sales Invoice", invoice) else "Property Invoice"
+	
+	_dispatch_whatsapp_with_buttons(
+		phone=phone,
+		message=message,
+		buttons=buttons,
+		organization=organization,
+		header=header,
+		footer=footer or "Nest Property Management",
+		ref_doctype=ref_doctype,
+		ref_name=invoice
+	)
+	
+	return {"channel": "whatsapp", "phone": phone, "invoice": invoice, "buttons": buttons}
+
+
+@frappe.whitelist()
+@envelope
+def send_rent_reminder_message(tenant, invoice=None, organization=None, **kwargs):
+	"""
+	Send a complete rent reminder to a tenant via WhatsApp with Pay Now button.
+	
+	This is a high-level function that composes the message, looks up invoice details,
+	and sends via WhatsApp with interactive buttons.
+	
+	Args:
+		tenant: Property Tenant name
+		invoice: Property Invoice or Sales Invoice name (optional, will find latest if not provided)
+		organization: Organization name
+	
+	Returns:
+		{channel: "whatsapp", phone, invoice, status}
+	"""
+	organization = resolve_organization(explicit=organization)
+	
+	# Get tenant details
+	tenant_doc = frappe.get_doc("Property Tenant", tenant)
+	phone = tenant_doc.get("phone")
+	
+	if not phone:
+		raise frappe.ValidationError(f"No phone number for tenant {tenant}")
+	
+	# Find invoice if not provided
+	if not invoice:
+		# Look for latest unpaid invoice
+		invoices = frappe.get_all(
+			"Sales Invoice",
+			filters={"customer": tenant_doc.tenant_name, "outstanding_amount": [">", 0], "docstatus": 1},
+			fields=["name"],
+			order_by="due_date asc",
+			limit=1
+		)
+		if invoices:
+			invoice = invoices[0].name
+		else:
+			# Try Property Invoice
+			invoices = frappe.get_all(
+				"Property Invoice",
+				filters={"tenant": tenant, "outstanding_amount": [">", 0]},
+				fields=["name"],
+				order_by="due_date asc",
+				limit=1
+			)
+			if invoices:
+				invoice = invoices[0].name
+	
+	if not invoice:
+		raise frappe.ValidationError(f"No outstanding invoice found for tenant {tenant}")
+	
+	# Use the centralized whatsapp module
+	from property_management.api.whatsapp import send_rent_reminder
+	result = send_rent_reminder(tenant_doc, invoice, organization)
+	
+	return {"channel": "whatsapp", "phone": phone, "invoice": invoice, "status": result.get("status", "sent")}
+
+
+@frappe.whitelist()
+@envelope
+def send_overdue_reminder_message(tenant, invoice=None, days_overdue=None, organization=None, **kwargs):
+	"""
+	Send an overdue payment notice to a tenant via WhatsApp with Pay Now button.
+	
+	Args:
+		tenant: Property Tenant name
+		invoice: Property Invoice or Sales Invoice name
+		days_overdue: Number of days the payment is overdue
+		organization: Organization name
+	
+	Returns:
+		{channel: "whatsapp", phone, invoice, days_overdue, status}
+	"""
+	organization = resolve_organization(explicit=organization)
+	
+	# Get tenant details
+	tenant_doc = frappe.get_doc("Property Tenant", tenant)
+	phone = tenant_doc.get("phone")
+	
+	if not phone:
+		raise frappe.ValidationError(f"No phone number for tenant {tenant}")
+	
+	if not invoice:
+		raise frappe.ValidationError("Invoice ID is required for overdue reminder")
+	
+	# Calculate days overdue if not provided
+	if days_overdue is None:
+		from frappe.utils import date_diff, nowdate
+		if frappe.db.exists("Sales Invoice", invoice):
+			due_date = frappe.db.get_value("Sales Invoice", invoice, "due_date")
+		else:
+			due_date = frappe.db.get_value("Property Invoice", invoice, "due_date")
+		days_overdue = date_diff(nowdate(), due_date) if due_date else 0
+	
+	# Use the centralized whatsapp module
+	from property_management.api.whatsapp import send_overdue_notice
+	result = send_overdue_notice(tenant_doc, invoice, days_overdue, organization)
+	
+	return {
+		"channel": "whatsapp",
+		"phone": phone,
+		"invoice": invoice,
+		"days_overdue": days_overdue,
+		"status": result.get("status", "sent")
+	}

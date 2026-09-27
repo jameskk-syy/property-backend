@@ -7,13 +7,25 @@
  "engine": "InnoDB",
  "field_order": [
   "organization",
+  "direction",
   "recipient_phone",
+  "message_type",
   "template_name",
   "status",
   "column_break_1",
   "provider_message_id",
+  "wamid",
+  "timestamp",
+  "section_content",
   "message_content",
-  "error_log"
+  "section_interactive",
+  "button_payload",
+  "button_text",
+  "reference_doctype",
+  "reference_name",
+  "section_response",
+  "error_log",
+  "raw_payload"
  ],
  "fields": [
   {
@@ -26,16 +38,32 @@
    "search_index": 1
   },
   {
+   "default": "Outgoing",
+   "fieldname": "direction",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Direction",
+   "options": "Outgoing\nIncoming",
+   "reqd": 1
+  },
+  {
    "fieldname": "recipient_phone",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "Recipient Phone",
+   "label": "Phone",
    "reqd": 1
+  },
+  {
+   "default": "text",
+   "fieldname": "message_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Message Type",
+   "options": "text\ntemplate\ninteractive\nimage\ndocument\nbutton_reply\nstatus_update"
   },
   {
    "fieldname": "template_name",
    "fieldtype": "Data",
-   "in_list_view": 1,
    "label": "Template Name"
   },
   {
@@ -44,7 +72,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Queued\nSent\nDelivered\nFailed",
+   "options": "Queued\nSent\nDelivered\nRead\nFailed",
    "reqd": 1
   },
   {
@@ -54,7 +82,25 @@
   {
    "fieldname": "provider_message_id",
    "fieldtype": "Data",
-   "label": "Provider Message ID"
+   "label": "Provider Message ID",
+   "description": "Message ID returned by API on send"
+  },
+  {
+   "fieldname": "wamid",
+   "fieldtype": "Data",
+   "label": "WhatsApp Message ID (wamid)",
+   "description": "Unique WhatsApp message identifier for status tracking",
+   "search_index": 1
+  },
+  {
+   "fieldname": "timestamp",
+   "fieldtype": "Datetime",
+   "label": "Message Timestamp"
+  },
+  {
+   "fieldname": "section_content",
+   "fieldtype": "Section Break",
+   "label": "Message Content"
   },
   {
    "fieldname": "message_content",
@@ -62,14 +108,57 @@
    "label": "Message Content"
   },
   {
+   "fieldname": "section_interactive",
+   "fieldtype": "Section Break",
+   "label": "Interactive / Button Details",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "button_payload",
+   "fieldtype": "Data",
+   "label": "Button Payload ID",
+   "description": "Button ID clicked by user (e.g. pay_stk_INV-001)"
+  },
+  {
+   "fieldname": "button_text",
+   "fieldtype": "Data",
+   "label": "Button Text",
+   "description": "Display text of button clicked"
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Data",
+   "label": "Reference DocType",
+   "description": "Linked document type (e.g. Property Invoice, Lease Agreement)"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Data",
+   "label": "Reference Name",
+   "description": "Linked document name"
+  },
+  {
+   "fieldname": "section_response",
+   "fieldtype": "Section Break",
+   "label": "Response / Error",
+   "collapsible": 1
+  },
+  {
    "fieldname": "error_log",
    "fieldtype": "Small Text",
    "label": "Error Log Details"
+  },
+  {
+   "fieldname": "raw_payload",
+   "fieldtype": "Code",
+   "label": "Raw Webhook Payload",
+   "options": "JSON",
+   "description": "Full webhook payload for debugging"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-10 00:00:00.000000",
+ "modified": "2026-09-25 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Property Management",
  "name": "WhatsApp Message Log",
@@ -87,6 +176,11 @@
    "role": "System Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Organization Admin"
   }
  ],
  "sort_field": "modified",

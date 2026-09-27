@@ -29,7 +29,13 @@ class Property(Document):
 			self.collection_account = f"Collection Bank/M-Pesa - {prefix}"
 
 	def after_insert(self):
+		self.create_cost_center()
 		self.create_ledger_accounts()
+
+	def create_cost_center(self):
+		"""Create a cost center for this property to enable per-property financial reporting."""
+		from property_management.api.accounting import setup_property_cost_center
+		setup_property_cost_center(self.name)
 
 	def create_ledger_accounts(self):
 		from property_management.api.accounting import setup_property_ledger_accounts

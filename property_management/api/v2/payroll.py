@@ -35,13 +35,17 @@ def run(company=None, organization=None, period=None, property=None):
 
 @frappe.whitelist()
 @envelope
-def list_employees(organization=None, property=None, limit=100):
+def list_employees(organization=None, property=None, search=None, page=1, page_size=8):
 	"""
-	List HRMS Employees with the app's custom fields (property_ref, gross_salary,
+	List HRMS Employees with pagination and the app's custom fields (property_ref, gross_salary,
 	mpesa_phone). Runs server-side so it is not blocked by /resource field
 	validation, and only requests custom fields that actually exist yet (they are
 	created on migrate), so it degrades gracefully before provisioning.
 	"""
+	# Sanitize pagination inputs
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+	
 	meta = frappe.get_meta("Employee")
 	fields = ["name", "employee_name", "designation", "status"]
 	for f in ("property_ref", "organization", "gross_salary", "mpesa_phone", "cell_number",
@@ -57,14 +61,41 @@ def list_employees(organization=None, property=None, limit=100):
 
 	rows = frappe.get_all(
 		"Employee", filters=filters, fields=fields,
-		order_by="modified desc", limit=int(limit),
+		order_by="modified desc",
 	)
+	
+	out = []
 	for r in rows:
 		# Normalise to stable keys the frontend expects.
 		r["property"] = r.get("property_ref") or ""
 		r["phone"] = r.get("mpesa_phone") or r.get("cell_number") or ""
 		r["email"] = r.get("personal_email") or ""
-	return rows
+		
+		# Apply search filter
+		if search:
+			s = str(search).lower()
+			hay = f"{r.get('employee_name', '')} {r.get('designation', '')} {r.get('phone', '')} {r.get('email', '')}".lower()
+			if s not in hay:
+				continue
+		out.append(r)
+	
+	# Apply pagination
+	total = len(out)
+	offset = (page - 1) * page_size
+	paginated = out[offset:offset + page_size]
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	
+	return {
+		'data': paginated,
+		'pagination': {
+			'page': page,
+			'page_size': page_size,
+			'total': total,
+			'total_pages': total_pages,
+			'has_next': page < total_pages,
+			'has_prev': page > 1
+		}
+	}
 
 
 def _resolve_company(company=None, organization=None, property=None):

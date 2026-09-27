@@ -77,12 +77,16 @@ def _scope_org(explicit=None):
 
 @frappe.whitelist()
 @envelope
-def list_projects(organization=None):
+def list_projects(organization=None, search=None, page=1, page_size=8):
 	"""
 	Construction projects with budget, actual spend and variance, scoped to the
 	caller's organization (projects are tied to an Organization/Company). An
 	explicit `organization` overrides; unrestricted execs may pass "all".
 	"""
+	# Sanitize pagination inputs
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+	
 	filters = {}
 	org = _scope_org(organization)
 	if org:
@@ -98,6 +102,12 @@ def list_projects(organization=None):
 	out = []
 	for r in rows:
 		prop_name = frappe.db.get_value("Property", r.property, "property_name") if r.property else ""
+		# Apply search filter
+		if search:
+			s = str(search).lower()
+			hay = f"{r.project_name or r.name} {prop_name} {r.status or ''}".lower()
+			if s not in hay:
+				continue
 		out.append({
 			"id": r.name,
 			"name": r.project_name or r.name,
@@ -111,7 +121,24 @@ def list_projects(organization=None):
 			"available": funded_spent.get(r.name, {}).get("available", 0.0),
 			"variance": flt(r.total_budget) - funded_spent.get(r.name, {}).get("spent", flt(r.total_actual_spend)),
 		})
-	return out
+	
+	# Apply pagination
+	total = len(out)
+	offset = (page - 1) * page_size
+	paginated = out[offset:offset + page_size]
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	
+	return {
+		'data': paginated,
+		'pagination': {
+			'page': page,
+			'page_size': page_size,
+			'total': total,
+			'total_pages': total_pages,
+			'has_next': page < total_pages,
+			'has_prev': page > 1
+		}
+	}
 
 
 @frappe.whitelist()
@@ -212,8 +239,12 @@ def budget_summary(project):
 
 @frappe.whitelist()
 @envelope
-def list_purchases(project=None, status=None, organization=None):
-	"""Material purchase records, newest first, with vendor + project names resolved."""
+def list_purchases(project=None, status=None, organization=None, search=None, page=1, page_size=8):
+	"""Material purchase records with pagination, newest first, with vendor + project names resolved."""
+	# Sanitize pagination inputs
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+	
 	filters = {}
 	if project:
 		filters["project"] = project
@@ -233,6 +264,13 @@ def list_purchases(project=None, status=None, organization=None):
 	for r in rows:
 		project_name = frappe.db.get_value("Construction Project", r.project, "project_name") if r.project else ""
 		prop_name = frappe.db.get_value("Property", r.property, "property_name") if r.property else ""
+		vendor_name = _vendor_name(r.vendor)
+		# Apply search filter
+		if search:
+			s = str(search).lower()
+			hay = f"{project_name} {prop_name} {vendor_name} {r.item_description or ''} {r.category or ''}".lower()
+			if s not in hay:
+				continue
 		# The linked PI is a custom field; read defensively.
 		pi = frappe.db.get_value("Construction Purchase", r.name, "purchase_invoice") if frappe.get_meta("Construction Purchase").has_field("purchase_invoice") else None
 		out.append({
@@ -241,7 +279,7 @@ def list_purchases(project=None, status=None, organization=None):
 			"projectName": project_name or r.project or "",
 			"property": prop_name or r.property or "",
 			"vendor": r.vendor,
-			"vendorName": _vendor_name(r.vendor),
+			"vendorName": vendor_name,
 			"category": r.category or "",
 			"description": r.item_description or "",
 			"amount": flt(r.amount),
@@ -252,7 +290,24 @@ def list_purchases(project=None, status=None, organization=None):
 			"purchaseInvoice": pi or None,
 			"date": str(r.creation)[:10] if r.creation else "",
 		})
-	return out
+	
+	# Apply pagination
+	total = len(out)
+	offset = (page - 1) * page_size
+	paginated = out[offset:offset + page_size]
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	
+	return {
+		'data': paginated,
+		'pagination': {
+			'page': page,
+			'page_size': page_size,
+			'total': total,
+			'total_pages': total_pages,
+			'has_next': page < total_pages,
+			'has_prev': page > 1
+		}
+	}
 
 
 @frappe.whitelist()
@@ -328,8 +383,12 @@ def reject_purchase(name, comment=None):
 
 @frappe.whitelist()
 @envelope
-def list_vendors(organization=None):
-	"""Expense Vendors for the vendor picker / suppliers page."""
+def list_vendors(organization=None, search=None, page=1, page_size=8):
+	"""Expense Vendors for the vendor picker / suppliers page with pagination."""
+	# Sanitize pagination inputs
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+	
 	filters = {}
 	org = _scope_org(organization)
 	if org:
@@ -342,6 +401,12 @@ def list_vendors(organization=None):
 	# Count how many construction purchases each vendor has (light activity signal).
 	out = []
 	for v in rows:
+		# Apply search filter
+		if search:
+			s = str(search).lower()
+			hay = f"{v.vendor_name or v.name} {v.category or ''} {v.phone_number or ''}".lower()
+			if s not in hay:
+				continue
 		purchases = frappe.db.count("Construction Purchase", {"vendor": v.name})
 		out.append({
 			"id": v.name,
@@ -351,7 +416,24 @@ def list_vendors(organization=None):
 			"notes": v.notes or "",
 			"purchases": purchases,
 		})
-	return out
+	
+	# Apply pagination
+	total = len(out)
+	offset = (page - 1) * page_size
+	paginated = out[offset:offset + page_size]
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	
+	return {
+		'data': paginated,
+		'pagination': {
+			'page': page,
+			'page_size': page_size,
+			'total': total,
+			'total_pages': total_pages,
+			'has_next': page < total_pages,
+			'has_prev': page > 1
+		}
+	}
 
 
 @frappe.whitelist()

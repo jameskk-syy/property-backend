@@ -250,6 +250,10 @@ def finalize_stk_payment(txn_name, mpesa_code, amount, phone):
 		return
 
 	frappe.set_user("Administrator")
+	
+	tenant_name = None
+	organization = txn.organization
+	new_balance = 0
 
 	if txn.kind == "Onboarding" and txn.reference_doctype == "Lease Agreement":
 		lease = frappe.get_doc("Lease Agreement", txn.reference_name)
@@ -264,18 +268,24 @@ def finalize_stk_payment(txn_name, mpesa_code, amount, phone):
 		if lease.unit:
 			frappe.db.set_value("Property Unit", lease.unit, "status", "Occupied")
 		txn.db_set("journal_entry", je, update_modified=False)
+		tenant_name = lease.tenant
+		organization = lease.organization
 
 	elif txn.kind == "Invoice" and txn.reference_doctype == "Sales Invoice":
 		# Native Sales Invoice payment (the real monthly invoice flow).
 		si = frappe.db.get_value("Sales Invoice", txn.reference_name,
-								 ["customer", "property_ref"], as_dict=True) or frappe._dict()
-		tenant = frappe.db.get_value("Property Tenant", {"tenant_name": si.get("customer")}, "name")
+								 ["customer", "property_ref", "outstanding_amount"], as_dict=True) or frappe._dict()
+		tenant_name = frappe.db.get_value("Property Tenant", {"tenant_name": si.get("customer")}, "name")
 		pe = pay.create_payment_entry(
 			property_name=si.get("property_ref"), amount=flt(amount),
-			sales_invoice=txn.reference_name, tenant=tenant,
+			sales_invoice=txn.reference_name, tenant=tenant_name,
 			payment_method="M-Pesa", reference_no=mpesa_code,
 		)
 		txn.db_set("payment_entry", pe, update_modified=False)
+		# Get updated balance after payment
+		new_balance = flt(frappe.db.get_value("Sales Invoice", txn.reference_name, "outstanding_amount"))
+		if si.get("property_ref"):
+			organization = frappe.db.get_value("Property", si.property_ref, "organization")
 
 	elif txn.kind == "Invoice" and txn.reference_doctype == "Property Invoice":
 		inv = frappe.get_doc("Property Invoice", txn.reference_name)
@@ -285,10 +295,57 @@ def finalize_stk_payment(txn_name, mpesa_code, amount, phone):
 			tenant=inv.tenant, payment_method="M-Pesa", reference_no=mpesa_code,
 		)
 		txn.db_set("payment_entry", pe, update_modified=False)
+		tenant_name = inv.tenant
+		organization = inv.organization
+		# Get updated balance
+		if sales_invoice:
+			new_balance = flt(frappe.db.get_value("Sales Invoice", sales_invoice, "outstanding_amount"))
 
 	txn.db_set("status", "Paid", update_modified=False)
 	txn.db_set("mpesa_receipt", mpesa_code, update_modified=False)
 	frappe.db.commit()
+	
+	# Send WhatsApp payment confirmation
+	if tenant_name:
+		_send_payment_confirmation_whatsapp(
+			tenant=tenant_name,
+			amount=amount,
+			mpesa_receipt=mpesa_code,
+			balance=new_balance,
+			organization=organization
+		)
+
+
+def _send_payment_confirmation_whatsapp(tenant, amount, mpesa_receipt, balance=0, organization=None):
+	"""
+	Send WhatsApp payment confirmation after successful M-Pesa payment.
+	Enqueued to avoid blocking the callback response.
+	"""
+	frappe.enqueue(
+		"property_management.api.mpesa._dispatch_payment_confirmation",
+		queue="default",
+		tenant=tenant,
+		amount=amount,
+		mpesa_receipt=mpesa_receipt,
+		balance=balance,
+		organization=organization
+	)
+
+
+def _dispatch_payment_confirmation(tenant, amount, mpesa_receipt, balance=0, organization=None):
+	"""Background job to send WhatsApp payment confirmation."""
+	try:
+		from property_management.api.whatsapp import send_payment_confirmation
+		send_payment_confirmation(
+			tenant=tenant,
+			amount=amount,
+			mpesa_receipt=mpesa_receipt,
+			balance=balance,
+			organization=organization
+		)
+		frappe.logger("mpesa").info(f"WhatsApp confirmation sent for {mpesa_receipt} to tenant {tenant}")
+	except Exception:
+		frappe.log_error(title="WhatsApp payment confirmation failed", message=frappe.get_traceback())
 
 
 # ------------------------------------------------------------------

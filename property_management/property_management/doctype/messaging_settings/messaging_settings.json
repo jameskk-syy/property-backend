@@ -29,9 +29,14 @@
   "whatsapp_enabled",
   "whatsapp_provider",
   "whatsapp_phone_number_id",
+  "whatsapp_waba_id",
   "column_break_wa",
   "whatsapp_access_token",
-  "whatsapp_base_url"
+  "whatsapp_base_url",
+  "section_whatsapp_waclient",
+  "whatsapp_instance_id",
+  "whatsapp_webhook_verify_token",
+  "whatsapp_forward_webhook_url"
  ],
  "fields": [
   {
@@ -142,7 +147,7 @@
   {
    "fieldname": "section_whatsapp",
    "fieldtype": "Section Break",
-   "label": "WhatsApp"
+   "label": "WhatsApp Cloud API"
   },
   {
    "default": "0",
@@ -151,16 +156,23 @@
    "label": "WhatsApp Enabled"
   },
   {
-   "default": "Meta Cloud API",
+   "default": "WAClient",
    "fieldname": "whatsapp_provider",
    "fieldtype": "Select",
    "label": "WhatsApp Provider",
-   "options": "Meta Cloud API\nTwilio\nGeneric HTTP"
+   "options": "WAClient\nMeta Cloud API\nTwilio"
   },
   {
    "fieldname": "whatsapp_phone_number_id",
    "fieldtype": "Data",
-   "label": "Phone Number ID / From"
+   "label": "Phone Number ID",
+   "description": "Meta Phone Number ID for sending messages"
+  },
+  {
+   "fieldname": "whatsapp_waba_id",
+   "fieldtype": "Data",
+   "label": "WABA ID",
+   "description": "WhatsApp Business Account ID from Meta"
   },
   {
    "fieldname": "column_break_wa",
@@ -169,18 +181,46 @@
   {
    "fieldname": "whatsapp_access_token",
    "fieldtype": "Password",
-   "label": "Access Token"
+   "label": "Access Token",
+   "description": "Permanent access token from Meta Business Suite"
   },
   {
-   "description": "API base URL (e.g. https://graph.facebook.com/v19.0).",
+   "default": "https://graph.facebook.com/v19.0",
+   "description": "API base URL (e.g. https://graph.facebook.com/v19.0)",
    "fieldname": "whatsapp_base_url",
    "fieldtype": "Data",
    "label": "WhatsApp Base URL"
+  },
+  {
+   "fieldname": "section_whatsapp_waclient",
+   "fieldtype": "Section Break",
+   "label": "WAClient Settings",
+   "collapsible": 1,
+   "description": "Additional settings when using WAClient as provider"
+  },
+  {
+   "fieldname": "whatsapp_instance_id",
+   "fieldtype": "Data",
+   "label": "WAClient Instance ID",
+   "description": "Instance ID from WAClient dashboard (e.g. META6A8073R86630)"
+  },
+  {
+   "fieldname": "whatsapp_webhook_verify_token",
+   "fieldtype": "Data",
+   "label": "Webhook Verify Token",
+   "description": "Random token for Meta webhook verification"
+  },
+  {
+   "fieldname": "whatsapp_forward_webhook_url",
+   "fieldtype": "Data",
+   "label": "Forward Webhook URL",
+   "description": "Your backend URL where WAClient forwards events (auto-filled)",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-17 00:00:00.000000",
+ "modified": "2026-09-25 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Property Management",
  "name": "Messaging Settings",

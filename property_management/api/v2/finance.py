@@ -101,15 +101,15 @@ def list_expense_categories(active_only=True):
 
 @frappe.whitelist()
 @envelope
-def list_expenses(property=None, organization=None, status=None, mine=None, limit=100):
+def list_expenses(property=None, organization=None, status=None, mine=None, page=1, page_size=8, search=None):
 	"""
-	List Property Expenses for the UI. Runs server-side (whitelisted), so it is
-	not blocked by the Property Expense doctype's role permissions the way the
-	raw /api/resource endpoint is.
-
-	Pass mine=1 to return only expenses raised by the current user (used by the
-	caretaker's Expense Management so a caretaker sees only what they created).
+	List Property Expenses with pagination for the UI.
 	"""
+	# Sanitize inputs
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+	offset = (page - 1) * page_size
+	
 	filters = {}
 	if property:
 		filters["property"] = property
@@ -119,12 +119,55 @@ def list_expenses(property=None, organization=None, status=None, mine=None, limi
 		filters["status"] = status
 	if mine in (1, "1", True, "true"):
 		filters["owner"] = frappe.session.user
-	return frappe.get_all(
-		"Property Expense", filters=filters,
-		fields=["name", "property", "organization", "vendor_name", "expense_category",
-				"amount", "work_description", "status", "approved_at", "creation", "owner"],
-		order_by="creation desc", limit=int(limit),
-	)
+	
+	# Search filter
+	or_filters = None
+	if search:
+		search_term = f'%{search}%'
+		or_filters = [
+			['Property Expense', 'vendor_name', 'like', search_term],
+			['Property Expense', 'work_description', 'like', search_term],
+		]
+	
+	# Get total count
+	if or_filters:
+		total = len(frappe.get_all('Property Expense', filters=filters, or_filters=or_filters, pluck='name'))
+	else:
+		total = frappe.db.count('Property Expense', filters)
+	
+	# Get paginated data
+	if or_filters:
+		data = frappe.get_all(
+			"Property Expense", filters=filters, or_filters=or_filters,
+			fields=["name", "property", "organization", "vendor_name", "expense_category",
+					"amount", "work_description", "status", "approved_at", "creation", "owner"],
+			order_by="creation desc",
+			limit_start=offset,
+			limit_page_length=page_size,
+		)
+	else:
+		data = frappe.get_all(
+			"Property Expense", filters=filters,
+			fields=["name", "property", "organization", "vendor_name", "expense_category",
+					"amount", "work_description", "status", "approved_at", "creation", "owner"],
+			order_by="creation desc",
+			limit_start=offset,
+			limit_page_length=page_size,
+		)
+	
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	
+	return {
+		'data': data,
+		'pagination': {
+			'page': page,
+			'page_size': page_size,
+			'total': total,
+			'total_pages': total_pages,
+			'has_next': page < total_pages,
+			'has_prev': page > 1
+		}
+	}
 
 
 @frappe.whitelist()
@@ -188,8 +231,13 @@ def raise_expense(property, amount, work_description, expense_category=None, ven
 
 @frappe.whitelist()
 @envelope
-def list_invoices(company=None, property=None, status=None, limit=50):
-	"""List Sales Invoices, optionally filtered by company/property/status."""
+def list_invoices(company=None, property=None, status=None, page=1, page_size=8, search=None):
+	"""List Sales Invoices with pagination."""
+	# Sanitize inputs
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+	offset = (page - 1) * page_size
+	
 	filters = {"docstatus": ["<", 2]}
 	if company:
 		filters["company"] = company
@@ -197,35 +245,77 @@ def list_invoices(company=None, property=None, status=None, limit=50):
 		filters["property_ref"] = property
 	if status:
 		filters["status"] = status
-	return frappe.get_all(
-		"Sales Invoice", filters=filters,
-		fields=["name", "customer", "company", "property_ref", "posting_date",
-				"grand_total", "outstanding_amount", "status"],
-		order_by="posting_date desc", limit=int(limit),
-	)
+	
+	# Search filter
+	or_filters = None
+	if search:
+		search_term = f'%{search}%'
+		or_filters = [
+			['Sales Invoice', 'customer', 'like', search_term],
+			['Sales Invoice', 'name', 'like', search_term],
+		]
+	
+	# Get total count
+	if or_filters:
+		total = len(frappe.get_all('Sales Invoice', filters=filters, or_filters=or_filters, pluck='name'))
+	else:
+		total = frappe.db.count('Sales Invoice', filters)
+	
+	# Get paginated data
+	if or_filters:
+		data = frappe.get_all(
+			"Sales Invoice", filters=filters, or_filters=or_filters,
+			fields=["name", "customer", "company", "property_ref", "posting_date",
+					"grand_total", "outstanding_amount", "status"],
+			order_by="posting_date desc",
+			limit_start=offset,
+			limit_page_length=page_size,
+		)
+	else:
+		data = frappe.get_all(
+			"Sales Invoice", filters=filters,
+			fields=["name", "customer", "company", "property_ref", "posting_date",
+					"grand_total", "outstanding_amount", "status"],
+			order_by="posting_date desc",
+			limit_start=offset,
+			limit_page_length=page_size,
+		)
+	
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	
+	return {
+		'data': data,
+		'pagination': {
+			'page': page,
+			'page_size': page_size,
+			'total': total,
+			'total_pages': total_pages,
+			'has_next': page < total_pages,
+			'has_prev': page > 1
+		}
+	}
 
 
 @frappe.whitelist()
 @envelope
-def list_all_invoices(kind=None, status=None, search=None, limit=200):
+def list_all_invoices(kind=None, status=None, search=None, page=1, page_size=8):
 	"""
-	Unified invoice register for admin: Sales Invoices (money in) + Purchase
-	Invoices (money out), scoped to the caller's organization Company. `kind` may
-	be 'sales', 'purchase', or None (both). Each row carries a `type`, the party,
-	totals and a `printUrl` for viewing/printing the native ERPNext document.
+	Unified invoice register for admin with pagination: Sales Invoices (money in) + Purchase
+	Invoices (money out), scoped to the caller's organization Company.
 	"""
 	from property_management.api.utils import resolve_organization
+
+	# Sanitize inputs
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+
 	org = resolve_organization()
 	company = frappe.db.get_value("Organization", org, "erpnext_company") if org else None
 	if not company:
 		from property_management.integration.settings import company_for_organization
 		company = company_for_organization(org) if org else None
 
-	base_url = frappe.utils.get_url()
-
 	def _print_url(doctype, name):
-		# Our own clean PDF endpoint — no Frappe desk shell, no print-format
-		# dependency, no login redirect. Rendered server-side and streamed.
 		from urllib.parse import quote
 		return (f"/api/method/property_management.api.v2.finance.invoice_pdf"
 				f"?doctype={quote(doctype)}&name={quote(name)}")
@@ -242,7 +332,7 @@ def list_all_invoices(kind=None, status=None, search=None, limit=200):
 			"Sales Invoice", filters=common_filters,
 			fields=["name", "customer", "posting_date", "due_date", "grand_total",
 					"outstanding_amount", "status"],
-			order_by="posting_date desc", limit=int(limit),
+			order_by="posting_date desc",
 		):
 			rows.append({
 				"id": si.name,
@@ -261,7 +351,7 @@ def list_all_invoices(kind=None, status=None, search=None, limit=200):
 			"Purchase Invoice", filters=common_filters,
 			fields=["name", "supplier", "posting_date", "due_date", "grand_total",
 					"outstanding_amount", "status"],
-			order_by="posting_date desc", limit=int(limit),
+			order_by="posting_date desc",
 		):
 			rows.append({
 				"id": pi.name,
@@ -281,7 +371,24 @@ def list_all_invoices(kind=None, status=None, search=None, limit=200):
 		rows = [r for r in rows if s in (r["id"] or "").lower() or s in (r["party"] or "").lower()]
 
 	rows.sort(key=lambda r: r["date"], reverse=True)
-	return rows
+
+	# Apply pagination
+	total = len(rows)
+	offset = (page - 1) * page_size
+	paginated_rows = rows[offset:offset + page_size]
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+
+	return {
+		'data': paginated_rows,
+		'pagination': {
+			'page': page,
+			'page_size': page_size,
+			'total': total,
+			'total_pages': total_pages,
+			'has_next': page < total_pages,
+			'has_prev': page > 1
+		}
+	}
 
 
 # --------------------------------------------------------------------------

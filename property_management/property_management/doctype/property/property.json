@@ -35,6 +35,7 @@
   "section_images",
   "images",
   "section_accounting",
+  "cost_center",
   "account_group",
   "receivables_account",
   "rent_income_account",
@@ -204,6 +205,13 @@
    "fieldname": "section_accounting",
    "fieldtype": "Section Break",
    "label": "Isolated Financial Ledger Accounts (Per-Apartment)"
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center",
+   "read_only": 1
   },
   {
    "fieldname": "account_group",

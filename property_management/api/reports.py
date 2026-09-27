@@ -4,6 +4,13 @@ from frappe.utils.pdf import get_pdf
 from collections import OrderedDict
 
 
+def _get_property_cost_center(property_name):
+    """Get cost_center for a property, used to filter GL entries."""
+    if not property_name:
+        return None
+    return frappe.db.get_value("Property", property_name, "cost_center")
+
+
 @frappe.whitelist()
 def rent_collection_report(property=None, from_date=None, to_date=None):
     """
@@ -11,9 +18,13 @@ def rent_collection_report(property=None, from_date=None, to_date=None):
     Sales Invoices; collected comes from the GL income accounts (real money received,
     including direct M-Pesa rent postings before monthly invoicing exists).
     """
+    cost_center = _get_property_cost_center(property)
+    
     si_filters = {"docstatus": 1}
     if from_date and to_date:
         si_filters["posting_date"] = ["between", [str(from_date), str(to_date)]]
+    if cost_center:
+        si_filters["cost_center"] = cost_center
 
     invoices = frappe.get_all(
         "Sales Invoice",
@@ -32,7 +43,7 @@ def rent_collection_report(property=None, from_date=None, to_date=None):
     total_outstanding = sum(flt(i.get("outstanding_amount")) for i in invoices)
 
     # Collected = real rent income recognised in the GL for the period.
-    total_collected = _gl_income(from_date, to_date) if (from_date and to_date) else _gl_income()
+    total_collected = _gl_income(from_date, to_date, cost_center=cost_center) if (from_date and to_date) else _gl_income(cost_center=cost_center)
 
     return {
         "total_invoiced": total_invoiced,
@@ -50,10 +61,16 @@ def rent_arrears_report(property=None, from_date=None, to_date=None):
     monthly rent invoices are generated, which is correct. Includes simple day-bucket
     aging so the frontend can filter by age.
     """
+    cost_center = _get_property_cost_center(property)
     today = getdate(nowdate())
+    
+    si_filters = {"docstatus": 1, "outstanding_amount": [">", 0]}
+    if cost_center:
+        si_filters["cost_center"] = cost_center
+        
     overdue_invoices = frappe.get_all(
         "Sales Invoice",
-        filters={"docstatus": 1, "outstanding_amount": [">", 0]},
+        filters=si_filters,
         fields=[
             "name", "customer as tenant", "due_date", "posting_date",
             "grand_total as total_amount", "outstanding_amount", "status",
@@ -90,6 +107,7 @@ def rent_arrears_report(property=None, from_date=None, to_date=None):
 def revenue_and_expense_trend(property=None, months=6):
     """Computes monthly collections and expenses from real database records."""
     from frappe.utils import get_first_day, get_last_day
+    cost_center = _get_property_cost_center(property)
     trend = []
     curr = getdate(nowdate())
     for i in range(int(months) - 1, -1, -1):
@@ -99,8 +117,8 @@ def revenue_and_expense_trend(property=None, months=6):
         trend.append({
             "month": formatdate(m_ref, "MMM"),
             "full_month": formatdate(m_ref, "MMM YYYY"),
-            "revenue": _gl_income(m_start, m_end),
-            "expenses": _gl_expense(m_start, m_end),
+            "revenue": _gl_income(m_start, m_end, cost_center=cost_center),
+            "expenses": _gl_expense(m_start, m_end, cost_center=cost_center),
         })
     return trend
 
@@ -138,7 +156,8 @@ def expense_report(property=None, from_date=None, to_date=None):
     reflects real posted spend (approved & posted expenses, purchase invoices, etc.),
     not the legacy Property Expense table.
     """
-    breakdown = _gl_account_breakdown("Expense", from_date, to_date)
+    cost_center = _get_property_cost_center(property)
+    breakdown = _gl_account_breakdown("Expense", from_date, to_date, cost_center=cost_center)
     by_category = {row["account_name"]: row["balance"] for row in breakdown}
     return {
         "total_expense": sum(flt(r["balance"]) for r in breakdown),
@@ -256,8 +275,9 @@ def profit_and_loss(property=None, from_date=None, to_date=None):
     custom Journal Entry doctype (which is empty). Income = credit-debit,
     Expenses = debit-credit, over the period.
     """
-    income_breakdown = _gl_account_breakdown("Income", from_date, to_date)
-    expense_breakdown = _gl_account_breakdown("Expense", from_date, to_date)
+    cost_center = _get_property_cost_center(property)
+    income_breakdown = _gl_account_breakdown("Income", from_date, to_date, cost_center=cost_center)
+    expense_breakdown = _gl_account_breakdown("Expense", from_date, to_date, cost_center=cost_center)
     total_income = sum(i["balance"] for i in income_breakdown)
     total_expenses = sum(e["balance"] for e in expense_breakdown)
     return {
@@ -562,10 +582,10 @@ def _income_accounts(company=None):
     return frappe.get_all("Account", filters=filters, pluck="name")
 
 
-def _gl_income(from_date=None, to_date=None, company=None):
+def _gl_income(from_date=None, to_date=None, company=None, cost_center=None):
     """
     Real revenue from the GL = credit - debit on Income accounts for the period.
-    Deposits (a liability) are correctly excluded. Scoped to a company if given.
+    Deposits (a liability) are correctly excluded. Scoped to a company/cost_center if given.
     """
     accounts = _income_accounts(company)
     if not accounts:
@@ -573,6 +593,8 @@ def _gl_income(from_date=None, to_date=None, company=None):
     filters = {"account": ["in", accounts], "is_cancelled": 0}
     if from_date and to_date:
         filters["posting_date"] = ["between", [str(from_date), str(to_date)]]
+    if cost_center:
+        filters["cost_center"] = cost_center
     rows = frappe.get_all("GL Entry", filters=filters, fields=["sum(credit) as c", "sum(debit) as d"])
     if not rows:
         return 0.0
@@ -587,7 +609,7 @@ def _expense_accounts(company=None):
     return frappe.get_all("Account", filters=filters, pluck="name")
 
 
-def _gl_expense(from_date=None, to_date=None, company=None):
+def _gl_expense(from_date=None, to_date=None, company=None, cost_center=None):
     """Real expenses from the GL = debit - credit on Expense accounts for the period."""
     accounts = _expense_accounts(company)
     if not accounts:
@@ -595,13 +617,15 @@ def _gl_expense(from_date=None, to_date=None, company=None):
     filters = {"account": ["in", accounts], "is_cancelled": 0}
     if from_date and to_date:
         filters["posting_date"] = ["between", [str(from_date), str(to_date)]]
+    if cost_center:
+        filters["cost_center"] = cost_center
     rows = frappe.get_all("GL Entry", filters=filters, fields=["sum(debit) as d", "sum(credit) as c"])
     if not rows:
         return 0.0
     return flt(rows[0].d) - flt(rows[0].c)
 
 
-def _gl_account_breakdown(root_type, from_date=None, to_date=None, company=None):
+def _gl_account_breakdown(root_type, from_date=None, to_date=None, company=None, cost_center=None):
     """Per-account net balance for a root_type (Income: credit-debit, Expense: debit-credit)."""
     filters = {"root_type": root_type, "is_group": 0}
     if company:
@@ -613,6 +637,8 @@ def _gl_account_breakdown(root_type, from_date=None, to_date=None, company=None)
     gl_filters = {"account": ["in", list(name_map.keys())], "is_cancelled": 0}
     if from_date and to_date:
         gl_filters["posting_date"] = ["between", [str(from_date), str(to_date)]]
+    if cost_center:
+        gl_filters["cost_center"] = cost_center
     rows = frappe.get_all(
         "GL Entry", filters=gl_filters,
         fields=["account", "sum(debit) as d", "sum(credit) as c"], group_by="account",

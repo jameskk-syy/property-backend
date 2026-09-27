@@ -14,6 +14,34 @@ from frappe.utils import flt
 
 from property_management.api.v2 import envelope
 from property_management.api.utils import resolve_organization
+def _file_to_base64(file_url):
+    """Convert a Frappe file URL to base64 data URL for frontend display."""
+    if not file_url:
+        return None
+    if file_url.startswith("data:"):
+        return file_url
+    try:
+        import base64, os, mimetypes
+        if file_url.startswith("/files/"):
+            file_name = file_url.replace("/files/", "")
+            file_path = os.path.join(frappe.get_site_path(), "public", "files", file_name)
+        elif file_url.startswith("/private/files/"):
+            file_name = file_url.replace("/private/files/", "")
+            file_path = os.path.join(frappe.get_site_path(), "private", "files", file_name)
+        else:
+            return file_url
+        if not os.path.exists(file_path):
+            return file_url
+        mime_type, _ = mimetypes.guess_type(file_path)
+        if not mime_type:
+            mime_type = "image/jpeg"
+        with open(file_path, "rb") as f:
+            data = base64.b64encode(f.read()).decode("utf-8")
+        return f"data:{mime_type};base64,{data}"
+    except Exception:
+        return file_url
+
+
 
 
 # --------------------------------------------------------------------------
@@ -205,14 +233,52 @@ def _property_unit_counts_by(link_field):
 
 @frappe.whitelist()
 @envelope
-def list_landlords():
-	"""List landlords with their assigned property + unit counts."""
+def list_landlords(page=1, page_size=8, search=None):
+	"""List landlords with their assigned property + unit counts and pagination."""
+	# Sanitize inputs
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+	offset = (page - 1) * page_size
+	
+	# Build filters for search
+	filters = {}
+	or_filters = None
+	if search:
+		search_term = f'%{search}%'
+		or_filters = [
+			['Landlord', 'landlord_name', 'like', search_term],
+			['Landlord', 'phone', 'like', search_term],
+			['Landlord', 'email', 'like', search_term],
+		]
+	
+	# Get total count
+	if or_filters:
+		total = len(frappe.get_all('Landlord', filters=filters, or_filters=or_filters, pluck='name'))
+	else:
+		total = frappe.db.count('Landlord', filters)
+	
 	counts = _property_unit_counts_by("landlord")
-	rows = frappe.get_all(
-		"Landlord",
-		fields=["name", "landlord_name", "phone", "email", "payout_bank_name", "payout_mpesa_phone"],
-		order_by="landlord_name asc",
-	)
+	
+	# Get paginated data
+	if or_filters:
+		rows = frappe.get_all(
+			"Landlord",
+			filters=filters,
+			or_filters=or_filters,
+			fields=["name", "landlord_name", "phone", "email", "payout_bank_name", "payout_mpesa_phone"],
+			order_by="landlord_name asc",
+			limit_start=offset,
+			limit_page_length=page_size,
+		)
+	else:
+		rows = frappe.get_all(
+			"Landlord",
+			fields=["name", "landlord_name", "phone", "email", "payout_bank_name", "payout_mpesa_phone"],
+			order_by="landlord_name asc",
+			limit_start=offset,
+			limit_page_length=page_size,
+		)
+	
 	out = []
 	for l in rows:
 		c = counts.get(l.name, {"properties": 0, "units": 0})
@@ -226,7 +292,20 @@ def list_landlords():
 			"payout_method": "M-Pesa" if l.payout_mpesa_phone else ("Bank" if l.payout_bank_name else "Bank"),
 			"status": "Active",
 		})
-	return out
+	
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	
+	return {
+		'data': out,
+		'pagination': {
+			'page': page,
+			'page_size': page_size,
+			'total': total,
+			'total_pages': total_pages,
+			'has_next': page < total_pages,
+			'has_prev': page > 1
+		}
+	}
 
 
 def _caretakers_for_user(user=None):
@@ -365,14 +444,52 @@ def my_arrears():
 
 @frappe.whitelist()
 @envelope
-def list_caretakers():
-	"""List caretakers with their assigned property + unit counts."""
+def list_caretakers(page=1, page_size=8, search=None):
+	"""List caretakers with their assigned property + unit counts and pagination."""
+	# Sanitize inputs
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+	offset = (page - 1) * page_size
+	
+	# Build filters for search
+	filters = {}
+	or_filters = None
+	if search:
+		search_term = f'%{search}%'
+		or_filters = [
+			['Caretaker', 'caretaker_name', 'like', search_term],
+			['Caretaker', 'phone', 'like', search_term],
+			['Caretaker', 'email', 'like', search_term],
+		]
+	
+	# Get total count
+	if or_filters:
+		total = len(frappe.get_all('Caretaker', filters=filters, or_filters=or_filters, pluck='name'))
+	else:
+		total = frappe.db.count('Caretaker', filters)
+	
 	counts = _property_unit_counts_by("caretaker")
-	rows = frappe.get_all(
-		"Caretaker",
-		fields=["name", "caretaker_name", "phone", "email"],
-		order_by="caretaker_name asc",
-	)
+	
+	# Get paginated data
+	if or_filters:
+		rows = frappe.get_all(
+			"Caretaker",
+			filters=filters,
+			or_filters=or_filters,
+			fields=["name", "caretaker_name", "phone", "email"],
+			order_by="caretaker_name asc",
+			limit_start=offset,
+			limit_page_length=page_size,
+		)
+	else:
+		rows = frappe.get_all(
+			"Caretaker",
+			fields=["name", "caretaker_name", "phone", "email"],
+			order_by="caretaker_name asc",
+			limit_start=offset,
+			limit_page_length=page_size,
+		)
+	
 	out = []
 	for c_row in rows:
 		c = counts.get(c_row.name, {"properties": 0, "units": 0})
@@ -385,7 +502,20 @@ def list_caretakers():
 			"units": c["units"],
 			"status": "Active",
 		})
-	return out
+	
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	
+	return {
+		'data': out,
+		'pagination': {
+			'page': page,
+			'page_size': page_size,
+			'total': total,
+			'total_pages': total_pages,
+			'has_next': page < total_pages,
+			'has_prev': page > 1
+		}
+	}
 
 
 @frappe.whitelist()
@@ -664,11 +794,12 @@ def get_property(property=None, name=None):
 		elif c.status == "Vacant":
 			vacant += c.cnt
 
-	# Images from the child table (cover first).
+	# Images from the child table (cover first) - convert to base64.
 	images = []
 	for img in (p.get("images") or []):
 		if img.image:
-			images.append({"url": img.image, "caption": img.caption or "", "is_cover": bool(img.is_cover)})
+			img_b64 = _file_to_base64(img.image)
+			images.append({"url": img_b64 or img.image, "caption": img.caption or "", "is_cover": bool(img.is_cover)})
 	images.sort(key=lambda x: 0 if x["is_cover"] else 1)
 	cover = p.get("cover_image") or (images[0]["url"] if images else None)
 
@@ -776,80 +907,139 @@ def bulk_create_properties(properties, organization=None):
 # Tenants (with income range + lease signatures)
 # --------------------------------------------------------------------------
 
+
 @frappe.whitelist()
 @envelope
-def list_tenants(limit=100):
+def list_tenants(page=1, page_size=8, search=None, limit=None):
 	"""
-	List tenants (server-side; avoids the /resource 403 for caretakers).
-
-	Each row is enriched with the tenant's assigned unit + monthly rent (from their
-	Active Lease Agreement) and their outstanding balance (from submitted native
-	Sales Invoices, which are GL-authoritative). Balance is 0 until monthly rent
-	invoices are generated, which is correct.
+	List tenants with server-side pagination.
+	
+	Args:
+		page: Page number (1-indexed), default 1
+		page_size: Records per page, default 8, max 100
+		search: Optional search term (searches name, phone, email)
+		limit: Deprecated - use page_size instead (kept for backward compatibility)
+	
+	Returns:
+		{data: [...], pagination: {page, page_size, total, total_pages, has_next, has_prev}}
 	"""
 	from frappe.utils import flt
-	rows = frappe.get_all(
-		"Property Tenant",
-		fields=["name", "tenant_name", "phone", "email", "national_id", "status", "creation"],
-		order_by="creation desc", limit=int(limit),
-	)
+	
+	# Handle backward compatibility with old limit param
+	if limit and not page_size:
+		page_size = int(limit)
+	
+	# Sanitize inputs
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+	offset = (page - 1) * page_size
+	
+	# Build search filters
+	filters = {}
+	or_filters = None
+	if search:
+		search_term = f'%{search}%'
+		or_filters = [
+			['Property Tenant', 'tenant_name', 'like', search_term],
+			['Property Tenant', 'phone', 'like', search_term],
+			['Property Tenant', 'email', 'like', search_term],
+		]
+	
+	# Get total count
+	if or_filters:
+		total = len(frappe.get_all('Property Tenant', filters=filters, or_filters=or_filters, pluck='name'))
+	else:
+		total = frappe.db.count('Property Tenant', filters)
+	
+	# Get paginated data
+	if or_filters:
+		rows = frappe.get_all(
+			'Property Tenant',
+			filters=filters,
+			or_filters=or_filters,
+			fields=['name', 'tenant_name', 'phone', 'email', 'national_id', 'status', 'creation'],
+			order_by='creation desc',
+			limit_start=offset,
+			limit_page_length=page_size
+		)
+	else:
+		rows = frappe.get_all(
+			'Property Tenant',
+			filters=filters,
+			fields=['name', 'tenant_name', 'phone', 'email', 'national_id', 'status', 'creation'],
+			order_by='creation desc',
+			limit_start=offset,
+			limit_page_length=page_size
+		)
+	
 	tenant_names = [t.name for t in rows]
-
-	# Active lease per tenant → unit + monthly rent. A tenant may hold more than
-	# one lease; keep the most recent Active one (iterate newest-first, first wins).
+	
+	# Active lease per tenant -> unit + monthly rent
 	lease_by_tenant = {}
 	unit_label = {}
 	if tenant_names:
 		leases = frappe.get_all(
-			"Lease Agreement",
-			filters={"tenant": ["in", tenant_names], "status": "Active"},
-			fields=["tenant", "unit", "rent_amount", "creation"],
-			order_by="creation desc",
+			'Lease Agreement',
+			filters={'tenant': ['in', tenant_names], 'status': 'Active'},
+			fields=['tenant', 'unit', 'rent_amount', 'creation'],
+			order_by='creation desc',
 		)
 		for le in leases:
 			if le.tenant not in lease_by_tenant:
 				lease_by_tenant[le.tenant] = le
-
-		# Friendly unit label (unit_number) for the leased units.
+		
 		unit_ids = list({le.unit for le in lease_by_tenant.values() if le.unit})
 		if unit_ids:
 			for u in frappe.get_all(
-				"Property Unit", filters={"name": ["in", unit_ids]},
-				fields=["name", "unit_number"],
+				'Property Unit', filters={'name': ['in', unit_ids]},
+				fields=['name', 'unit_number'],
 			):
 				unit_label[u.name] = u.unit_number or u.name
-
-	# Outstanding balance per tenant from native Sales Invoices. These are keyed by
-	# Customer, whose name mirrors the tenant's display name (see ensure_customer).
+	
+	# Outstanding balance per tenant from Sales Invoices
 	balance_by_customer = {}
 	tenant_display = {t.name: (t.tenant_name or t.name) for t in rows}
 	customer_names = list({v for v in tenant_display.values()})
 	if customer_names:
 		for r in frappe.get_all(
-			"Sales Invoice",
-			filters={"docstatus": 1, "customer": ["in", customer_names], "outstanding_amount": [">", 0]},
-			fields=["customer", "sum(outstanding_amount) as bal"],
-			group_by="customer",
+			'Sales Invoice',
+			filters={'docstatus': 1, 'customer': ['in', customer_names], 'outstanding_amount': ['>', 0]},
+			fields=['customer', 'sum(outstanding_amount) as bal'],
+			group_by='customer',
 		):
-			balance_by_customer[r["customer"]] = flt(r["bal"])
-
-	out = []
+			balance_by_customer[r['customer']] = flt(r['bal'])
+	
+	# Build output
+	data = []
 	for t in rows:
 		le = lease_by_tenant.get(t.name)
 		balance = balance_by_customer.get(tenant_display.get(t.name), 0.0)
-		base_status = t.status or "Active"
-		out.append({
-			"id": t.name,
-			"name": t.tenant_name or t.name,
-			"phone": t.phone or "",
-			"email": t.email or "",
-			"national_id": t.national_id or "",
-			"unit": (unit_label.get(le.unit, le.unit) if le else "") or "",
-			"rent": flt(le.rent_amount) if le else 0.0,
-			"balance": balance,
-			"status": "Overdue" if balance > 0 else base_status,
+		base_status = t.status or 'Active'
+		data.append({
+			'id': t.name,
+			'name': t.tenant_name or t.name,
+			'phone': t.phone or '',
+			'email': t.email or '',
+			'national_id': t.national_id or '',
+			'unit': (unit_label.get(le.unit, le.unit) if le else '') or '',
+			'rent': flt(le.rent_amount) if le else 0.0,
+			'balance': balance,
+			'status': 'Overdue' if balance > 0 else base_status,
 		})
-	return out
+	
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	
+	return {
+		'data': data,
+		'pagination': {
+			'page': page,
+			'page_size': page_size,
+			'total': total,
+			'total_pages': total_pages,
+			'has_next': page < total_pages,
+			'has_prev': page > 1
+		}
+	}
 
 
 @frappe.whitelist()
@@ -1295,20 +1485,53 @@ def _map_unit_type(value):
 
 @frappe.whitelist()
 @envelope
-def list_units(property=None):
+def list_units(property=None, search=None, page=1, page_size=8):
 	"""
-	List Property Units for a property (or all). Runs server-side so it is not
+	List Property Units with pagination for a property (or all). Runs server-side so it is not
 	blocked by the Property Unit doctype's role permissions the way /resource is.
 	"""
+	# Sanitize pagination inputs
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+	
 	filters = {}
 	if property:
 		filters["property"] = property
-	return frappe.get_all(
+	
+	rows = frappe.get_all(
 		"Property Unit", filters=filters,
 		fields=["name", "unit_number", "unit_type", "base_rent", "security_deposit",
 				"status", "property", "floor"],
 		order_by="unit_number asc",
 	)
+	
+	out = []
+	for r in rows:
+		# Apply search filter
+		if search:
+			s = str(search).lower()
+			hay = f"{r.get('unit_number', '')} {r.get('unit_type', '')} {r.get('floor', '')} {r.get('status', '')}".lower()
+			if s not in hay:
+				continue
+		out.append(r)
+	
+	# Apply pagination
+	total = len(out)
+	offset = (page - 1) * page_size
+	paginated = out[offset:offset + page_size]
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	
+	return {
+		'data': paginated,
+		'pagination': {
+			'page': page,
+			'page_size': page_size,
+			'total': total,
+			'total_pages': total_pages,
+			'has_next': page < total_pages,
+			'has_prev': page > 1
+		}
+	}
 
 
 @frappe.whitelist()
@@ -1460,14 +1683,18 @@ def vacate_unit(lease=None, reason=None, held_items=None):
 
 @frappe.whitelist()
 @envelope
-def list_held_items(tenant=None, property=None):
+def list_held_items(tenant=None, property=None, search=None, page=1, page_size=8):
 	"""
-	List Held Tenant Items, optionally filtered by tenant and/or property.
+	List Held Tenant Items with pagination, optionally filtered by tenant and/or property.
 	Photos are returned as base64 data URLs (frontend can't reach the bench
 	files origin cross-domain). Caretaker scoping is enforced by the
 	permission_query_conditions hook on the doctype.
 	"""
 	from property_management.api.documents import file_to_data_url
+
+	# Sanitize pagination inputs
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
 
 	filters = {}
 	if tenant:
@@ -1483,13 +1710,38 @@ def list_held_items(tenant=None, property=None):
 		order_by="held_on desc",
 	)
 
+	out = []
 	for r in rows:
+		# Apply search filter
+		if search:
+			s = str(search).lower()
+			hay = f"{r.get('tenant_name', '')} {r.get('item_name', '')} {r.get('description', '')}".lower()
+			if s not in hay:
+				continue
 		if r.get("photo"):
 			try:
 				r["photo"] = file_to_data_url(r["photo"]) or r["photo"]
 			except Exception:
 				pass
-	return rows
+		out.append(r)
+	
+	# Apply pagination
+	total = len(out)
+	offset = (page - 1) * page_size
+	paginated = out[offset:offset + page_size]
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	
+	return {
+		'data': paginated,
+		'pagination': {
+			'page': page,
+			'page_size': page_size,
+			'total': total,
+			'total_pages': total_pages,
+			'has_next': page < total_pages,
+			'has_prev': page > 1
+		}
+	}
 
 
 # --------------------------------------------------------------------------
@@ -1567,6 +1819,22 @@ def bulk_create_tenants(tenants, organization=None):
 	if not org:
 		raise frappe.ValidationError("No Organization configured")
 
+	# Pre-bootstrap accounting masters ONCE (not per tenant)
+	needs_accounting = any(
+		row.get("already_paid") in (True, "true", "True", "yes", "Yes", "1", 1)
+		and row.get("unit") and row.get("property")
+		for row in tenants
+	)
+	
+	# Cache for accounting lookups to avoid repeated queries
+	accounting_cache = {}
+	if needs_accounting:
+		try:
+			from property_management.integration.erpnext_setup import bootstrap_global_masters
+			bootstrap_global_masters()
+		except:
+			pass
+
 	created, updated, failed = [], [], []
 	for row in tenants:
 		try:
@@ -1593,8 +1861,8 @@ def bulk_create_tenants(tenants, organization=None):
 				)
 				
 				if already_paid and lease:
-					# Create accounting entries and mark as paid
-					_post_migration_payment(lease, rent, deposit, prop)
+					# Create accounting entries and mark as paid (with cache)
+					_post_migration_payment(lease, rent, deposit, prop, accounting_cache)
 			
 			(created if was_created else updated).append(doc.name)
 		except Exception as e:
@@ -1643,19 +1911,21 @@ def _create_migration_lease(tenant, property_name, unit, rent, deposit, organiza
 	return lease
 
 
-def _post_migration_payment(lease, rent_amount, deposit_amount, property_name):
+def _post_migration_payment(lease, rent_amount, deposit_amount, property_name, cache=None):
 	"""
 	Create accounting entries for a migrated tenant who already paid.
 	Generates a migration reference number and creates a Journal Entry.
+	Uses cache to avoid repeated lookups for company/accounts.
 	"""
 	from frappe.utils import today, now_datetime
 	from property_management.integration.erpnext_setup import (
-		bootstrap_global_masters,
 		get_income_account,
 		ensure_deposit_liability_account,
 		provision_property_cost_center,
 	)
 	from property_management.integration.payments import _paid_to_account
+	
+	cache = cache or {}
 	
 	# Generate migration reference: MIG-YYYYMMDD-XXXXX
 	ref_date = now_datetime().strftime("%Y%m%d")
@@ -1666,79 +1936,89 @@ def _post_migration_payment(lease, rent_amount, deposit_amount, property_name):
 	if total <= 0:
 		return
 	
-	# Get the property doc for company info
-	prop = frappe.get_doc("Property", property_name)
-	company = None
-	if prop.organization:
-		company = frappe.db.get_value("Organization", prop.organization, "erpnext_company")
-	if not company:
-		company = frappe.db.get_single_value("Global Defaults", "default_company")
+	# Get company (cached per property)
+	cache_key = f"company_{property_name}"
+	if cache_key in cache:
+		company = cache[cache_key]
+	else:
+		prop = frappe.get_doc("Property", property_name)
+		company = None
+		if prop.organization:
+			company = frappe.db.get_value("Organization", prop.organization, "erpnext_company")
+		if not company:
+			company = frappe.db.get_single_value("Global Defaults", "default_company")
+		cache[cache_key] = company
+		cache[f"prop_{property_name}"] = prop
 	
 	if not company:
 		frappe.log_error(f"No company found for migration payment on {property_name}")
 		return
 	
-	try:
-		# Bootstrap accounts if needed
-		bootstrap_global_masters()
-		
-		# Get accounts
-		bank = _paid_to_account(company)
-		rent_income = get_income_account(company, "Rent")
-		deposit_liab = ensure_deposit_liability_account(company)
-		cost_center = prop.get("cost_center") or provision_property_cost_center(property_name)
-		
-		# Build journal entry lines
-		accounts = [{
-			"account": bank,
-			"debit_in_account_currency": total,
-			"credit_in_account_currency": 0,
+	# Get accounts (cached per company)
+	bank_key = f"bank_{company}"
+	rent_key = f"rent_{company}"
+	deposit_key = f"deposit_{company}"
+	cc_key = f"cc_{property_name}"
+	
+	if bank_key not in cache:
+		cache[bank_key] = _paid_to_account(company)
+	if rent_key not in cache:
+		cache[rent_key] = get_income_account(company, "Rent")
+	if deposit_key not in cache:
+		cache[deposit_key] = ensure_deposit_liability_account(company)
+	if cc_key not in cache:
+		prop = cache.get(f"prop_{property_name}") or frappe.get_doc("Property", property_name)
+		cache[cc_key] = prop.get("cost_center") or provision_property_cost_center(property_name)
+	
+	bank = cache[bank_key]
+	rent_income = cache[rent_key]
+	deposit_liab = cache[deposit_key]
+	cost_center = cache[cc_key]
+	
+	# Build journal entry lines
+	accounts = [{
+		"account": bank,
+		"debit_in_account_currency": total,
+		"credit_in_account_currency": 0,
+		"cost_center": cost_center,
+	}]
+	
+	if rent_amount > 0 and rent_income:
+		accounts.append({
+			"account": rent_income,
+			"debit_in_account_currency": 0,
+			"credit_in_account_currency": rent_amount,
 			"cost_center": cost_center,
-		}]
-		
-		if rent_amount > 0 and rent_income:
-			accounts.append({
-				"account": rent_income,
-				"debit_in_account_currency": 0,
-				"credit_in_account_currency": rent_amount,
-				"cost_center": cost_center,
-			})
-		
-		if deposit_amount > 0 and deposit_liab:
-			accounts.append({
-				"account": deposit_liab,
-				"debit_in_account_currency": 0,
-				"credit_in_account_currency": deposit_amount,
-				"cost_center": cost_center,
-			})
-		
-		# Create ERPNext Journal Entry
-		je = frappe.get_doc({
-			"doctype": "Journal Entry",
-			"voucher_type": "Journal Entry",
-			"company": company,
-			"posting_date": today(),
-			"cheque_no": reference_no,
-			"cheque_date": today(),
-			"user_remark": f"Migration: Opening balance for {lease.tenant} - {property_name} (ref {reference_no})",
-			"accounts": accounts,
 		})
-		je.flags.ignore_mandatory = True
-		je.insert(ignore_permissions=True)
-		je.submit()
-		
-		# Update lease with journal entry reference
-		frappe.db.set_value("Lease Agreement", lease.name, {
-			"initial_payment_status": "Paid",
-			"journal_entry": je.name,
+	
+	if deposit_amount > 0 and deposit_liab:
+		accounts.append({
+			"account": deposit_liab,
+			"debit_in_account_currency": 0,
+			"credit_in_account_currency": deposit_amount,
+			"cost_center": cost_center,
 		})
-		
-		frappe.db.commit()
-		
-	except Exception as e:
-		frappe.log_error(f"Migration payment failed for {lease.name}: {str(e)}")
-		# Still mark as paid even if accounting fails
-		frappe.db.set_value("Lease Agreement", lease.name, "initial_payment_status", "Paid")
+	
+	# Create ERPNext Journal Entry
+	je = frappe.get_doc({
+		"doctype": "Journal Entry",
+		"voucher_type": "Journal Entry",
+		"company": company,
+		"posting_date": today(),
+		"cheque_no": reference_no,
+		"cheque_date": today(),
+		"user_remark": f"Migration: Opening balance for {lease.tenant} - {property_name} (ref {reference_no})",
+		"accounts": accounts,
+	})
+	je.flags.ignore_mandatory = True
+	je.insert(ignore_permissions=True)
+	je.submit()
+	
+	# Update lease with journal entry reference
+	frappe.db.set_value("Lease Agreement", lease.name, {
+		"initial_payment_status": "Paid",
+		"journal_entry": je.name,
+	})
 
 
 @frappe.whitelist()

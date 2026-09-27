@@ -137,11 +137,15 @@ def my_property_detail(property=None):
 
 	# Images from the child table (cover first).
 	images = []
+	base_url = frappe.utils.get_url()
 	for img in (p.get("images") or []):
 		if img.image:
-			images.append({"url": img.image, "caption": img.caption or "", "is_cover": bool(img.is_cover)})
+			# Convert relative paths to full URLs
+			url = img.image if img.image.startswith(('http://', 'https://')) else f"{base_url}{img.image}"
+			images.append({"url": url, "caption": img.caption or "", "is_cover": bool(img.is_cover)})
 	images.sort(key=lambda x: 0 if x["is_cover"] else 1)
-	cover = p.get("cover_image") or (images[0]["url"] if images else None)
+	cover_raw = p.get("cover_image") or (images[0]["url"] if images else None)
+	cover = cover_raw if (cover_raw and cover_raw.startswith(('http://', 'https://'))) else (f"{base_url}{cover_raw}" if cover_raw else None)
 
 	caretaker_name = frappe.db.get_value("Caretaker", p.caretaker, "caretaker_name") if p.caretaker else None
 

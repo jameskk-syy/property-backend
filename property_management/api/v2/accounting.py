@@ -49,21 +49,43 @@ def list_accounts(company=None, property=None, root_type=None):
 
 @frappe.whitelist()
 @envelope
-def list_journal_entries(company=None, property=None, from_date=None, to_date=None, limit=50):
-	"""List submitted/draft Journal Entries for a company, with their line accounts."""
+def list_journal_entries(company=None, property=None, from_date=None, to_date=None, limit=50, page=1, page_size=8):
+	"""List submitted/draft Journal Entries for a company, with pagination.
+	
+	Args:
+		company: Company name
+		property: Property to filter by
+		from_date, to_date: Date range filter
+		page: Page number (1-indexed), default 1
+		page_size: Records per page (default 8)
+		limit: Deprecated - use page_size
+	
+	Returns:
+		{data: [...], pagination: {...}}
+	"""
 	company, _cc = _company_and_cost_center(company, property)
 	if not company:
 		frappe.throw("company or property is required")
+
+	# Pagination
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+	offset = (page - 1) * page_size
 
 	filters = {"company": company, "docstatus": ["<", 2]}
 	if from_date and to_date:
 		filters["posting_date"] = ["between", [str(from_date), str(to_date)]]
 
+	# Get total count
+	total = frappe.db.count("Journal Entry", filters)
+
 	entries = frappe.get_all(
 		"Journal Entry", filters=filters,
 		fields=["name", "posting_date", "total_debit", "total_credit", "user_remark",
 				"is_opening", "docstatus", "voucher_type"],
-		order_by="posting_date desc, creation desc", limit=int(limit),
+		order_by="posting_date desc, creation desc",
+		limit_start=offset,
+		limit_page_length=page_size,
 	)
 	for e in entries:
 		e["accounts"] = frappe.get_all(
@@ -71,7 +93,20 @@ def list_journal_entries(company=None, property=None, from_date=None, to_date=No
 			fields=["account", "debit_in_account_currency as debit", "credit_in_account_currency as credit"],
 		)
 		e["status"] = {0: "Draft", 1: "Submitted", 2: "Cancelled"}.get(e.docstatus, "")
-	return entries
+
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+
+	return {
+		"data": entries,
+		"pagination": {
+			"page": page,
+			"page_size": page_size,
+			"total": total,
+			"total_pages": total_pages,
+			"has_next": page < total_pages,
+			"has_prev": page > 1
+		}
+	}
 
 
 def _post_journal_entry(company, lines, posting_date=None, remark=None, is_opening=0, cost_center=None):

@@ -256,7 +256,6 @@ def list_vacancies(location=None, min_rent=None, max_rent=None, types=None,
 			"contact": contact,
 			"desc": prop.description or "",
 			"cover_image": cover,
-			"images": gallery,
 		})
 
 	# Stable ordering: most vacant first, then title.
@@ -305,4 +304,122 @@ def vacancy_filters():
 		"locations": ["All areas"] + sorted(locations),
 		"types": types,
 		"amenities": sorted(amenities),
+	}
+
+
+
+@frappe.whitelist(allow_guest=True)
+def get_vacancy_details(vacancy_id):
+	"""
+	Get full details for a specific vacancy listing including all gallery images.
+	
+	Args:
+		vacancy_id: The listing ID in format "property_name::unit_type"
+	
+	Returns full listing details including:
+		- All property images (gallery)
+		- Property details
+		- Available units of this type
+		- Contact information
+	"""
+	if not vacancy_id:
+		frappe.throw("vacancy_id is required")
+	
+	# Parse the vacancy_id (format: "property_name::unit_type")
+	parts = vacancy_id.split("::")
+	if len(parts) != 2:
+		frappe.throw("Invalid vacancy_id format. Expected 'property_name::unit_type'")
+	
+	prop_name, unit_type = parts[0], parts[1]
+	
+	# Get the property
+	if not frappe.db.exists("Property", prop_name):
+		frappe.throw("Property not found")
+	
+	prop = frappe.get_doc("Property", prop_name)
+	
+	# Get vacant units of this type
+	vacant_units = frappe.get_all(
+		"Property Unit",
+		filters={
+			"property": prop_name,
+			"unit_type": unit_type,
+			"status": "Vacant"
+		},
+		fields=["name", "unit_number", "unit_type", "base_rent", "floor_number", 
+				"bedrooms", "bathrooms", "square_footage", "description"],
+		order_by="unit_number asc",
+		ignore_permissions=True
+	)
+	
+	if not vacant_units:
+		frappe.throw("No vacant units found for this listing")
+	
+	# Get total units of this type
+	total_units = frappe.db.count("Property Unit", {
+		"property": prop_name,
+		"unit_type": unit_type
+	})
+	
+	# Get all gallery images
+	gallery = _property_images(prop_name)
+	cover = _data_url(prop.cover_image) or (gallery[0] if gallery else None)
+	
+	# Get caretaker contact
+	contact = {"name": "Nyumba Agent", "phone": ""}
+	if prop.caretaker:
+		caretaker = frappe.db.get_value(
+			"Caretaker", prop.caretaker, 
+			["caretaker_name", "phone"], as_dict=True
+		)
+		if caretaker:
+			contact = {
+				"name": caretaker.caretaker_name or "Nyumba Agent",
+				"phone": caretaker.phone or ""
+			}
+	
+	# Parse amenities
+	amenities = _split_amenities(prop.amenities)
+	
+	# Location label
+	location_label = prop.sub_county or prop.county or (prop.address or "").split(",")[0].strip() or prop.property_name
+	
+	# Get the lowest rent among vacant units
+	min_rent = min([flt(u.base_rent) for u in vacant_units if u.base_rent], default=0)
+	
+	return {
+		"id": vacancy_id,
+		"title": prop.property_name or prop_name,
+		"type": _TYPE_LABELS.get(unit_type, unit_type),
+		"location": location_label,
+		"address": prop.address or "",
+		"county": prop.county or "",
+		"sub_county": prop.sub_county or "",
+		"rent": min_rent,
+		"vacant": len(vacant_units),
+		"total": total_units,
+		"amenities": amenities,
+		"contact": contact,
+		"desc": prop.description or "",
+		"cover_image": cover,
+		"images": gallery,
+		"property_details": {
+			"year_built": prop.year_built,
+			"total_units": prop.total_units,
+			"floors": prop.floors,
+		},
+		"units": [
+			{
+				"id": u.name,
+				"unit_number": u.unit_number,
+				"type": _TYPE_LABELS.get(u.unit_type, u.unit_type),
+				"rent": flt(u.base_rent),
+				"floor": u.floor_number,
+				"bedrooms": u.bedrooms,
+				"bathrooms": u.bathrooms,
+				"size": u.square_footage,
+				"description": u.description or "",
+			}
+			for u in vacant_units
+		]
 	}

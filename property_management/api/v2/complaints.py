@@ -20,11 +20,15 @@ from property_management.api.v2 import envelope
 
 @frappe.whitelist()
 @envelope
-def list_complaints(property=None, tenant=None, status=None, category=None, search=None, limit=200):
+def list_complaints(property=None, tenant=None, status=None, category=None, search=None, page=1, page_size=8):
 	"""
-	Complaints for the admin, filterable by property and/or tenant. Uses get_list
-	so multi-tenant + property-scoped permissions apply automatically.
+	Complaints for the admin with pagination, filterable by property and/or tenant.
+	Uses get_list so multi-tenant + property-scoped permissions apply automatically.
 	"""
+	# Sanitize pagination inputs
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+	
 	filters = {}
 	if property:
 		filters["property"] = property
@@ -35,12 +39,13 @@ def list_complaints(property=None, tenant=None, status=None, category=None, sear
 	if category:
 		filters["category"] = category
 
+	# Get all matching rows first (for search filtering and total count)
 	rows = frappe.get_list(
 		"Tenant Complaint", filters=filters,
 		fields=["name", "tenant", "tenant_name", "property", "unit", "category",
 				"priority", "status", "subject", "description", "admin_response",
 				"responded_by", "responded_at", "creation"],
-		order_by="creation desc", limit=int(limit), ignore_permissions=False,
+		order_by="creation desc", ignore_permissions=False,
 	)
 
 	out = []
@@ -69,7 +74,24 @@ def list_complaints(property=None, tenant=None, status=None, category=None, sear
 			"respondedAt": str(r.responded_at)[:19] if r.responded_at else None,
 			"date": str(r.creation)[:10] if r.creation else "",
 		})
-	return out
+	
+	# Apply pagination
+	total = len(out)
+	offset = (page - 1) * page_size
+	paginated = out[offset:offset + page_size]
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	
+	return {
+		'data': paginated,
+		'pagination': {
+			'page': page,
+			'page_size': page_size,
+			'total': total,
+			'total_pages': total_pages,
+			'has_next': page < total_pages,
+			'has_prev': page > 1
+		}
+	}
 
 
 @frappe.whitelist()
