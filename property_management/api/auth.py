@@ -114,9 +114,10 @@ def login(email, password):
             frappe.throw(_('Invalid email or password'), frappe.AuthenticationError)
         
         # Create a proper Frappe session (sets session cookie)
-        # Use post_login which properly initializes the session
-        frappe.local.login_manager.user = user_id
-        frappe.local.login_manager.post_login()
+        from frappe.auth import LoginManager
+        login_manager = LoginManager()
+        login_manager.user = user_id
+        login_manager.post_login()
         
         # Get user data in single query - include phone fields
         user_data = frappe.db.get_value('User', user_id, 
