@@ -523,21 +523,71 @@ def _verify_stored_otp(user_id, otp):
     return True, "OTP verified successfully."
 
 
-def _send_otp_whatsapp(phone, otp):
-    """Send OTP via WhatsApp. In dev mode, just log it."""
+def _send_otp_via_messaging(phone, otp, user_id=None):
+    """
+    Send OTP via enabled messaging channels (WhatsApp, SMS, Email).
+    Uses Messaging Settings to determine which channels are enabled.
+    In dev mode, just logs the OTP.
+    """
     if DEV_MODE:
         frappe.log_error(f"DEV MODE - OTP for {phone}: {otp}", "OTP Debug")
-        return True
+        return True, ["dev_log"]
     
-    # Production: Send via WhatsApp API
-    try:
-        from property_management.integration.whatsapp import send_whatsapp_message
-        message = f"Your Nest login code is: {otp}\n\nThis code expires in {OTP_EXPIRY_MINUTES} minutes. Do not share it with anyone."
-        send_whatsapp_message(phone, message)
-        return True
-    except Exception as e:
-        frappe.log_error(f"WhatsApp OTP send failed: {str(e)}")
-        return False
+    # Get user's organization to find messaging settings
+    organization = None
+    if user_id:
+        # Try to find organization from user's linked entities
+        for doctype in ["Caretaker", "Landlord", "Property Tenant"]:
+            org = frappe.db.get_value(doctype, {"user": user_id}, "organization")
+            if org:
+                organization = org
+                break
+    
+    # Get messaging settings
+    msg_settings = None
+    if organization:
+        name = frappe.db.get_value("Messaging Settings", {"organization": organization}, "name")
+        if name:
+            msg_settings = frappe.get_doc("Messaging Settings", name)
+    
+    message = f"Your Nest login code is: {otp}\n\nThis code expires in {OTP_EXPIRY_MINUTES} minutes. Do not share it with anyone."
+    sent_via = []
+    
+    # Try WhatsApp first (preferred for OTP)
+    if msg_settings and msg_settings.get("whatsapp_enabled"):
+        try:
+            from property_management.api.whatsapp import send_text_message
+            send_text_message(phone, message, organization)
+            sent_via.append("whatsapp")
+        except Exception as e:
+            frappe.log_error(f"OTP WhatsApp failed: {str(e)}", "OTP Delivery")
+    
+    # Try SMS as backup/alternative
+    if msg_settings and msg_settings.get("sms_enabled"):
+        try:
+            from property_management.api.messaging import _dispatch_sms
+            sms_msg = f"Your Nest login code: {otp}. Expires in {OTP_EXPIRY_MINUTES} mins."
+            _dispatch_sms(phone, sms_msg, organization)
+            sent_via.append("sms")
+        except Exception as e:
+            frappe.log_error(f"OTP SMS failed: {str(e)}", "OTP Delivery")
+    
+    # Fallback: Try legacy WhatsApp integration if no messaging settings
+    if not sent_via:
+        try:
+            from property_management.integration.whatsapp import send_whatsapp_message
+            send_whatsapp_message(phone, message)
+            sent_via.append("whatsapp_legacy")
+        except Exception as e:
+            frappe.log_error(f"OTP WhatsApp legacy failed: {str(e)}", "OTP Delivery")
+    
+    return len(sent_via) > 0, sent_via
+
+
+def _send_otp_whatsapp(phone, otp):
+    """Send OTP via WhatsApp. In dev mode, just log it. (Legacy wrapper)"""
+    success, channels = _send_otp_via_messaging(phone, otp)
+    return success
 
 
 @frappe.whitelist(allow_guest=True)
@@ -587,12 +637,20 @@ def request_otp(phone):
     # Store OTP
     _store_otp(user_id, otp)
     
-    # Send OTP (WhatsApp or log in dev mode)
-    sent = _send_otp_whatsapp(normalized, otp)
+    # Send OTP via enabled messaging channels
+    sent, channels = _send_otp_via_messaging(normalized, otp, user_id)
+    
+    # Determine message based on channels used
+    if "whatsapp" in channels or "whatsapp_legacy" in channels:
+        channel_msg = "WhatsApp"
+    elif "sms" in channels:
+        channel_msg = "SMS"
+    else:
+        channel_msg = "your phone"
     
     response = {
         "status": "success",
-        "message": f"OTP sent to your WhatsApp. Valid for {OTP_EXPIRY_MINUTES} minutes.",
+        "message": f"OTP sent to your {channel_msg}. Valid for {OTP_EXPIRY_MINUTES} minutes.",
         "phone_masked": f"****{normalized[-4:]}"
     }
     
@@ -719,3 +777,165 @@ def resend_otp(phone):
     Same as request_otp but with rate limiting message.
     """
     return request_otp(phone)
+
+
+@frappe.whitelist()
+def change_password(current_password, new_password):
+    """
+    Change password for the currently logged-in user.
+    
+    Args:
+        current_password: User's current password
+        new_password: New password to set
+        
+    Returns:
+        dict: { status, message }
+    """
+    if not current_password or not new_password:
+        return {
+            "status": "error",
+            "message": "Current password and new password are required"
+        }
+    
+    user_id = frappe.session.user
+    
+    if user_id == "Guest":
+        return {
+            "status": "error",
+            "message": "Please login first"
+        }
+    
+    # Validate new password strength
+    if len(new_password) < 8:
+        return {
+            "status": "error",
+            "message": "New password must be at least 8 characters long"
+        }
+    
+    # Verify current password
+    try:
+        from frappe.utils.password import check_password
+        check_password(user_id, current_password)
+    except frappe.AuthenticationError:
+        return {
+            "status": "error",
+            "message": "Current password is incorrect"
+        }
+    
+    # Update password
+    try:
+        from frappe.utils.password import update_password as _update_pwd
+        _update_pwd(user_id, new_password)
+        frappe.db.commit()
+        
+        return {
+            "status": "success",
+            "message": "Password changed successfully"
+        }
+    except Exception as e:
+        frappe.log_error(f"Password change failed: {str(e)}", "Change Password")
+        return {
+            "status": "error",
+            "message": "Failed to change password. Please try again."
+        }
+
+
+@frappe.whitelist()
+def get_current_user_profile():
+    """
+    Get profile information for the currently logged-in user.
+    
+    Returns:
+        dict: { status, data: { id, name, email, phone, role, can_change_password } }
+    """
+    user_id = frappe.session.user
+    
+    if user_id == "Guest":
+        return {
+            "status": "error",
+            "message": "Please login first"
+        }
+    
+    user_data = frappe.db.get_value('User', user_id, 
+        ['name', 'email', 'full_name', 'first_name', 'last_name', 'mobile_no', 'phone'], as_dict=True)
+    
+    if not user_data:
+        return {
+            "status": "error",
+            "message": "User not found"
+        }
+    
+    # Determine role
+    role = 'user'
+    if user_id == 'Administrator':
+        role = 'admin'
+    elif frappe.db.exists('Has Role', {'parent': user_id, 'role': ['in', ['Administrator', 'System Manager', 'Director']]}):
+        role = 'admin'
+    elif frappe.db.exists('Caretaker', {'user': user_id}):
+        role = 'caretaker'
+    elif frappe.db.exists('Landlord', {'user': user_id}):
+        role = 'landlord'
+    elif frappe.db.exists('Property Tenant', {'user': user_id}):
+        role = 'tenant'
+    
+    display_name = user_data.get('full_name') or f"{user_data.get('first_name', '')} {user_data.get('last_name', '')}".strip() or user_id.split('@')[0]
+    
+    return {
+        "status": "success",
+        "data": {
+            "id": user_id,
+            "name": display_name,
+            "first_name": user_data.get('first_name'),
+            "last_name": user_data.get('last_name'),
+            "email": user_data.get('email'),
+            "phone": user_data.get('mobile_no') or user_data.get('phone'),
+            "role": role,
+            "can_change_password": True
+        }
+    }
+
+
+@frappe.whitelist()
+def update_profile(first_name=None, last_name=None, phone=None):
+    """
+    Update profile information for the currently logged-in user.
+    
+    Args:
+        first_name: New first name (optional)
+        last_name: New last name (optional)
+        phone: New phone number (optional)
+        
+    Returns:
+        dict: { status, message, data }
+    """
+    user_id = frappe.session.user
+    
+    if user_id == "Guest":
+        return {
+            "status": "error",
+            "message": "Please login first"
+        }
+    
+    try:
+        user = frappe.get_doc("User", user_id)
+        
+        if first_name is not None:
+            user.first_name = first_name
+        if last_name is not None:
+            user.last_name = last_name
+        if phone is not None:
+            user.mobile_no = phone
+            user.phone = phone
+        
+        user.save(ignore_permissions=True)
+        frappe.db.commit()
+        
+        # Return updated profile
+        return get_current_user_profile()
+        
+    except Exception as e:
+        frappe.log_error(f"Profile update failed: {str(e)}", "Update Profile")
+        return {
+            "status": "error",
+            "message": "Failed to update profile. Please try again."
+        }
