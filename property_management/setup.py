@@ -118,6 +118,16 @@ def _ensure_roles():
 			}).insert(ignore_permissions=True)
 
 
+def _ensure_admin_phone():
+	"""Ensure Administrator has a phone number for OTP login."""
+	admin_phone = "254724233713"  # Default admin phone
+	admin = frappe.get_doc("User", "Administrator")
+	if not admin.mobile_no:
+		admin.mobile_no = admin_phone
+		admin.save(ignore_permissions=True)
+		frappe.db.commit()
+
+
 # The default parent Organization. Its ERPNext Company is named the same, so
 # the Company created for it is "Dadis Estates Limited". Everything in the app
 # is wired to an Organization, so at least one must exist for creates to work.
@@ -171,6 +181,7 @@ def seed_access_modules():
 	org = ensure_default_organization()
 	ensure_default_company(org)
 	_ensure_roles()
+	_ensure_admin_phone()
 
 	# Create a Module Def for each granular module key.
 	for key in ACCESS_MODULE_KEYS:
