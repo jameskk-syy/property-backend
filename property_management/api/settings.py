@@ -217,6 +217,7 @@ _MSG_PLAIN_FIELDS = [
 	"email_enabled", "email_from_name", "email_from_address",
 	"smtp_host", "smtp_port", "smtp_use_tls", "smtp_username",
 	"whatsapp_enabled", "whatsapp_provider", "whatsapp_phone_number_id", "whatsapp_base_url",
+	"whatsapp_waba_id", "whatsapp_instance_id", "whatsapp_webhook_verify_token", "whatsapp_forward_webhook_url",
 ]
 # Secrets are never returned in plaintext; only a '<field>_set' flag is reported.
 _MSG_SECRET_FIELDS = ["sms_api_secret", "smtp_password", "whatsapp_access_token"]

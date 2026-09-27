@@ -48,12 +48,101 @@ def _file_to_base64(file_url):
 # User + role provisioning (shared by landlord / caretaker / tenant onboarding)
 # --------------------------------------------------------------------------
 
-# Default password for onboarded accounts (credentials aren't emailed yet).
-_DEFAULT_ONBOARD_PASSWORD = "maina@254"
+import secrets
+import string
 
 # Desk access per role. Caretaker uses the desk-scoped app; Tenant/Landlord are
 # portal-only (no desk), with no Module Permission rows => all module perms false.
 _ROLE_DESK_ACCESS = {"Caretaker": 1, "Landlord": 0, "Tenant": 0}
+
+
+def _generate_random_password(length=10):
+	"""Generate a secure random password with letters, digits, and special chars."""
+	alphabet = string.ascii_letters + string.digits + "!@#$%"
+	# Ensure at least one of each type
+	password = [
+		secrets.choice(string.ascii_lowercase),
+		secrets.choice(string.ascii_uppercase),
+		secrets.choice(string.digits),
+		secrets.choice("!@#$%"),
+	]
+	# Fill the rest
+	password += [secrets.choice(alphabet) for _ in range(length - 4)]
+	# Shuffle
+	secrets.SystemRandom().shuffle(password)
+	return "".join(password)
+
+
+def _send_credentials_notification(user_id, password, full_name, phone, email, role, organization=None):
+	"""
+	Send login credentials to user via enabled messaging channels (WhatsApp, SMS, Email).
+	Uses transactional messaging mode from Messaging Settings.
+	"""
+	try:
+		# Resolve organization if not provided
+		if not organization:
+			organization = resolve_organization()
+		
+		# Get messaging settings
+		msg_settings = None
+		if organization:
+			name = frappe.db.get_value("Messaging Settings", {"organization": organization}, "name")
+			if name:
+				msg_settings = frappe.get_doc("Messaging Settings", name)
+		
+		# Build credentials message
+		login_id = email if email and not email.endswith("@nest.local") else phone
+		message = (
+			f"Hello {full_name},\n\n"
+			f"Your Nest Property Management account has been created.\n\n"
+			f"🔑 Login Details:\n"
+			f"Username: {login_id}\n"
+			f"Password: {password}\n\n"
+			f"Role: {role}\n\n"
+			f"Please change your password after first login for security.\n\n"
+			f"- Nest Property Management"
+		)
+		
+		sent_via = []
+		
+		# Send via WhatsApp if enabled
+		if phone and msg_settings and msg_settings.get("whatsapp_enabled"):
+			try:
+				from property_management.api.whatsapp import send_text_message
+				send_text_message(phone, message, organization)
+				sent_via.append("whatsapp")
+			except Exception as e:
+				frappe.log_error(f"Credentials WhatsApp failed: {e}", "Credentials Notification")
+		
+		# Send via SMS if enabled
+		if phone and msg_settings and msg_settings.get("sms_enabled"):
+			try:
+				from property_management.api.messaging import _dispatch_sms
+				# Shorter SMS version
+				sms_msg = f"Nest Login - User: {login_id}, Password: {password}. Change password after login."
+				_dispatch_sms(phone, sms_msg, organization)
+				sent_via.append("sms")
+			except Exception as e:
+				frappe.log_error(f"Credentials SMS failed: {e}", "Credentials Notification")
+		
+		# Send via Email if enabled and email is real (not synthetic @nest.local)
+		if email and not email.endswith("@nest.local") and msg_settings and msg_settings.get("email_enabled"):
+			try:
+				from property_management.api.messaging import _dispatch_email
+				_dispatch_email(email, message, "Your Nest Property Management Account", organization)
+				sent_via.append("email")
+			except Exception as e:
+				frappe.log_error(f"Credentials Email failed: {e}", "Credentials Notification")
+		
+		if sent_via:
+			frappe.logger().info(f"Credentials sent to {user_id} via: {', '.join(sent_via)}")
+		else:
+			frappe.logger().warning(f"No messaging channel enabled to send credentials to {user_id}")
+		
+		return sent_via
+	except Exception as e:
+		frappe.log_error(f"Failed to send credentials: {e}", "Credentials Notification")
+		return []
 
 
 def _parse_datetime(value):
@@ -107,14 +196,19 @@ def _phone_digits(phone):
 	return "".join(ch for ch in str(phone or "") if ch.isdigit())
 
 
-def _ensure_user_with_role(email, full_name, role, phone=None):
+def _ensure_user_with_role(email, full_name, role, phone=None, organization=None):
 	"""
 	Create (or reuse) a Frappe User for a person, keyed by email when available
 	else by a synthetic address derived from the phone number, so the account can
 	be linked/identified by phone. Grants the given role (matched
-	case-insensitively; created if missing) and sets the default onboarding
-	password. Returns the user id, or None if neither email nor phone is given.
-	Idempotent.
+	case-insensitively; created if missing).
+	
+	For NEW users:
+	- Generates a random secure password (not hardcoded)
+	- Sends credentials via enabled messaging channels (WhatsApp/SMS/Email)
+	
+	Returns the user id, or None if neither email nor phone is given.
+	Idempotent for existing users.
 	"""
 	email = (email or "").strip()
 	digits = _phone_digits(phone)
@@ -136,6 +230,9 @@ def _ensure_user_with_role(email, full_name, role, phone=None):
 
 	is_new = not frappe.db.exists("User", user_id)
 	if is_new:
+		# Generate random password for new users
+		password = _generate_random_password()
+		
 		user = frappe.get_doc({
 			"doctype": "User",
 			"email": user_id,
@@ -145,10 +242,24 @@ def _ensure_user_with_role(email, full_name, role, phone=None):
 			"phone": phone or None,
 			"send_welcome_email": 0,
 			"user_type": "System User",
-			"new_password": _DEFAULT_ONBOARD_PASSWORD,
+			"new_password": password,
 		})
 		user.flags.ignore_permissions = True
 		user.insert(ignore_permissions=True)
+		
+		# Send credentials notification via enabled messaging channels
+		frappe.enqueue(
+			_send_credentials_notification,
+			user_id=user_id,
+			password=password,
+			full_name=full_name,
+			phone=phone,
+			email=email if email and not email.endswith("@nest.local") else None,
+			role=role_name,
+			organization=organization,
+			queue="short",
+			now=frappe.flags.in_test,
+		)
 	else:
 		user = frappe.get_doc("User", user_id)
 		if phone and not user.mobile_no:
@@ -181,11 +292,11 @@ def _upsert_landlord(row, organization):
 		doc.email = email or doc.email
 		# Backfill the user link/role for existing records too.
 		if not doc.get("user"):
-			doc.user = _ensure_user_with_role(email, name, "Landlord", phone)
+			doc.user = _ensure_user_with_role(email, name, "Landlord", phone, organization)
 		doc.save(ignore_permissions=True)
 		return doc, False
 
-	user_id = _ensure_user_with_role(email, name, "Landlord", phone)
+	user_id = _ensure_user_with_role(email, name, "Landlord", phone, organization)
 
 	doc = frappe.get_doc({
 		"doctype": "Landlord",
@@ -583,11 +694,11 @@ def _upsert_caretaker(row, organization):
 		doc.phone = phone or doc.phone
 		doc.email = email or doc.email
 		if not doc.get("user"):
-			doc.user = _ensure_user_with_role(email, name, "Caretaker", phone)
+			doc.user = _ensure_user_with_role(email, name, "Caretaker", phone, organization)
 		doc.save(ignore_permissions=True)
 		return doc, False
 
-	user_id = _ensure_user_with_role(email, name, "Caretaker", phone)
+	user_id = _ensure_user_with_role(email, name, "Caretaker", phone, organization)
 
 	doc = frappe.get_doc({
 		"doctype": "Caretaker",
@@ -1052,7 +1163,7 @@ def create_tenant(tenant_name=None, phone=None, email=None, national_id=None,
 	if not organization:
 		raise frappe.ValidationError("No Organization configured")
 
-	user_id = _ensure_user_with_role(email, tenant_name, "Tenant", phone)
+	user_id = _ensure_user_with_role(email, tenant_name, "Tenant", phone, organization)
 
 	doc = frappe.get_doc({
 		"doctype": "Property Tenant",
@@ -1108,7 +1219,7 @@ def onboard_tenant(tenant_name=None, phone=None, email=None, national_id=None,
 	if not property or not unit:
 		raise frappe.ValidationError("Select a property and a vacant unit to onboard the tenant.")
 
-	user_id = _ensure_user_with_role(email, tenant_name, "Tenant", phone)
+	user_id = _ensure_user_with_role(email, tenant_name, "Tenant", phone, organization)
 
 	tenant = frappe.get_doc({
 		"doctype": "Property Tenant",
@@ -1768,11 +1879,11 @@ def _upsert_tenant(row, organization):
 		if income_range:
 			doc.income_range = income_range
 		if not doc.get("user"):
-			doc.user = _ensure_user_with_role(email, name, "Tenant", phone)
+			doc.user = _ensure_user_with_role(email, name, "Tenant", phone, organization)
 		doc.save(ignore_permissions=True)
 		return doc, False
 
-	user_id = _ensure_user_with_role(email, name, "Tenant", phone)
+	user_id = _ensure_user_with_role(email, name, "Tenant", phone, organization)
 	doc = frappe.get_doc({
 		"doctype": "Property Tenant",
 		"organization": organization,
