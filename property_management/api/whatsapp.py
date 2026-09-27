@@ -890,16 +890,28 @@ def _send_support_info(phone, organization):
 
 # ---------------------------------------------------------------------------
 # High-Level Message Functions (for use by other modules)
+# Uses templates for proactive messages (outside 24-hour window)
 # ---------------------------------------------------------------------------
 
-def send_rent_reminder(tenant, invoice, organization=None):
+# Template names - create these in Meta Business Suite
+TEMPLATE_RENT_REMINDER = "rent_reminder"  # Parameters: {{1}}=name, {{2}}=amount, {{3}}=due_date
+TEMPLATE_OVERDUE_NOTICE = "overdue_notice"  # Parameters: {{1}}=name, {{2}}=amount, {{3}}=days_overdue
+TEMPLATE_PAYMENT_RECEIVED = "payment_received"  # Parameters: {{1}}=name, {{2}}=amount, {{3}}=receipt, {{4}}=balance
+TEMPLATE_INVOICE_READY = "invoice_ready"  # Parameters: {{1}}=name, {{2}}=invoice_id, {{3}}=amount, {{4}}=due_date
+
+
+def send_rent_reminder(tenant, invoice, organization=None, use_template=True):
     """
-    Send a rent reminder message with Pay Now button.
+    Send a rent reminder message.
+    
+    Uses template for proactive outreach (recommended).
+    Falls back to interactive buttons if user has messaged within 24 hours.
     
     Args:
         tenant: Property Tenant name or doc
         invoice: Property Invoice or Sales Invoice name
         organization: Organization name
+        use_template: If True, uses approved template (works outside 24-hour window)
     """
     if isinstance(tenant, str):
         tenant = frappe.get_doc("Property Tenant", tenant)
@@ -924,42 +936,66 @@ def send_rent_reminder(tenant, invoice, organization=None):
     
     organization = organization or inv.get("organization") or resolve_organization()
     
-    # Get unit info
-    unit_info = ""
-    lease = frappe.db.get_value("Lease Agreement", {"tenant": tenant.name, "status": "Active"},
-                                 ["unit", "property"], as_dict=True)
-    if lease:
-        unit_info = f"Unit: {lease.unit}\n"
+    # Format values
+    tenant_name = tenant.tenant_name or tenant.name
+    amount_str = f"{flt(amount):,.0f}"
+    due_date_str = str(due_date) if due_date else "N/A"
     
-    body = (
-        f"Hello {tenant.tenant_name},\n\n"
-        f"This is a reminder that your rent payment is due.\n\n"
-        f"💰 Amount: KES {flt(amount):,.0f}\n"
-        f"📅 Due Date: {due_date}\n"
-        f"{unit_info}\n"
-        f"Tap 'Pay Now' to pay instantly via M-Pesa."
-    )
-    
-    buttons = [
-        {"id": f"pay_stk_{inv_id}", "title": "Pay Now"},
-        {"id": "contact_support", "title": "Contact Support"}
-    ]
-    
-    return send_interactive_buttons(
-        phone=phone,
-        header_text="📅 Rent Reminder",
-        body_text=body,
-        buttons=buttons,
-        organization=organization,
-        footer_text="Nest Property Management",
-        ref_doctype="Property Invoice" if frappe.db.exists("Property Invoice", invoice) else "Sales Invoice",
-        ref_name=invoice
-    )
+    if use_template:
+        # Use template for proactive messaging (outside 24-hour window)
+        return send_template_message(
+            phone=phone,
+            template_name=TEMPLATE_RENT_REMINDER,
+            language_code="en",
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": tenant_name},     # {{1}} name
+                        {"type": "text", "text": amount_str},      # {{2}} amount
+                        {"type": "text", "text": due_date_str}     # {{3}} due_date
+                    ]
+                }
+            ],
+            organization=organization
+        )
+    else:
+        # Use interactive buttons (only works within 24-hour window)
+        body = (
+            f"Hello {tenant_name},\n\n"
+            f"This is a reminder that your rent payment is due.\n\n"
+            f"💰 Amount: KES {amount_str}\n"
+            f"📅 Due Date: {due_date_str}\n\n"
+            f"Tap 'Pay Now' to pay instantly via M-Pesa."
+        )
+        
+        buttons = [
+            {"id": f"pay_stk_{inv_id}", "title": "Pay Now"},
+            {"id": "contact_support", "title": "Contact Support"}
+        ]
+        
+        return send_interactive_buttons(
+            phone=phone,
+            header_text="📅 Rent Reminder",
+            body_text=body,
+            buttons=buttons,
+            organization=organization,
+            footer_text="NEST@R Property",
+            ref_doctype="Property Invoice" if frappe.db.exists("Property Invoice", invoice) else "Sales Invoice",
+            ref_name=invoice
+        )
 
 
-def send_overdue_notice(tenant, invoice, days_overdue, organization=None):
+def send_overdue_notice(tenant, invoice, days_overdue, organization=None, use_template=True):
     """
-    Send an overdue payment notice with Pay Now button.
+    Send an overdue payment notice.
+    
+    Args:
+        tenant: Property Tenant name or doc
+        invoice: Property Invoice or Sales Invoice name
+        days_overdue: Number of days payment is overdue
+        organization: Organization name
+        use_template: If True, uses approved template
     """
     if isinstance(tenant, str):
         tenant = frappe.get_doc("Property Tenant", tenant)
@@ -981,34 +1017,60 @@ def send_overdue_notice(tenant, invoice, days_overdue, organization=None):
     
     organization = organization or resolve_organization()
     
-    body = (
-        f"Hello {tenant.tenant_name},\n\n"
-        f"⚠️ Your rent payment is {days_overdue} days overdue.\n\n"
-        f"💰 Outstanding: KES {flt(amount):,.0f}\n\n"
-        f"Please pay immediately to avoid late fees and service disruption.\n\n"
-        f"Tap 'Pay Now' to pay via M-Pesa."
-    )
+    # Format values
+    tenant_name = tenant.tenant_name or tenant.name
+    amount_str = f"{flt(amount):,.0f}"
+    days_str = str(days_overdue)
     
-    buttons = [
-        {"id": f"pay_stk_{inv_id}", "title": "Pay Now"},
-        {"id": "contact_support", "title": "Contact Support"}
-    ]
-    
-    return send_interactive_buttons(
-        phone=phone,
-        header_text="⚠️ Payment Overdue",
-        body_text=body,
-        buttons=buttons,
-        organization=organization,
-        footer_text="Nest Property Management",
-        ref_doctype="Property Invoice" if frappe.db.exists("Property Invoice", invoice) else "Sales Invoice",
-        ref_name=invoice
-    )
+    if use_template:
+        return send_template_message(
+            phone=phone,
+            template_name=TEMPLATE_OVERDUE_NOTICE,
+            language_code="en",
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": tenant_name},  # {{1}} name
+                        {"type": "text", "text": amount_str},   # {{2}} amount
+                        {"type": "text", "text": days_str}      # {{3}} days_overdue
+                    ]
+                }
+            ],
+            organization=organization
+        )
+    else:
+        body = (
+            f"Hello {tenant_name},\n\n"
+            f"⚠️ Your rent payment is {days_overdue} days overdue.\n\n"
+            f"💰 Outstanding: KES {amount_str}\n\n"
+            f"Please pay immediately to avoid late fees and service disruption.\n\n"
+            f"Tap 'Pay Now' to pay via M-Pesa."
+        )
+        
+        buttons = [
+            {"id": f"pay_stk_{inv_id}", "title": "Pay Now"},
+            {"id": "contact_support", "title": "Contact Support"}
+        ]
+        
+        return send_interactive_buttons(
+            phone=phone,
+            header_text="⚠️ Payment Overdue",
+            body_text=body,
+            buttons=buttons,
+            organization=organization,
+            footer_text="NEST@R Property",
+            ref_doctype="Property Invoice" if frappe.db.exists("Property Invoice", invoice) else "Sales Invoice",
+            ref_name=invoice
+        )
 
 
-def send_payment_confirmation(tenant, amount, mpesa_receipt, balance=0, organization=None):
+def send_payment_confirmation(tenant, amount, mpesa_receipt, balance=0, organization=None, use_template=True):
     """
     Send payment confirmation message after successful M-Pesa payment.
+    
+    Note: Payment confirmations are responses to user actions, so they're
+    typically within the 24-hour window. Template is optional but recommended.
     """
     if isinstance(tenant, str):
         tenant = frappe.get_doc("Property Tenant", tenant)
@@ -1019,19 +1081,43 @@ def send_payment_confirmation(tenant, amount, mpesa_receipt, balance=0, organiza
     
     organization = organization or resolve_organization()
     
-    message = (
-        f"✅ Payment Received!\n\n"
-        f"Thank you, {tenant.tenant_name}!\n\n"
-        f"💰 Amount: KES {flt(amount):,.0f}\n"
-        f"📝 M-Pesa Ref: {mpesa_receipt}\n"
-        f"📊 New Balance: KES {flt(balance):,.0f}\n\n"
-        f"Your payment has been recorded."
-    )
+    # Format values
+    tenant_name = tenant.tenant_name or tenant.name
+    amount_str = f"{flt(amount):,.0f}"
+    balance_str = f"{flt(balance):,.0f}"
     
-    return send_text_message(phone, message, organization)
+    if use_template:
+        return send_template_message(
+            phone=phone,
+            template_name=TEMPLATE_PAYMENT_RECEIVED,
+            language_code="en",
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": tenant_name},     # {{1}} name
+                        {"type": "text", "text": amount_str},      # {{2}} amount
+                        {"type": "text", "text": mpesa_receipt},   # {{3}} receipt
+                        {"type": "text", "text": balance_str}      # {{4}} balance
+                    ]
+                }
+            ],
+            organization=organization
+        )
+    else:
+        message = (
+            f"✅ Payment Received!\n\n"
+            f"Thank you, {tenant_name}!\n\n"
+            f"💰 Amount: KES {amount_str}\n"
+            f"📝 M-Pesa Ref: {mpesa_receipt}\n"
+            f"📊 New Balance: KES {balance_str}\n\n"
+            f"Your payment has been recorded."
+        )
+        
+        return send_text_message(phone, message, organization)
 
 
-def send_invoice_notification(tenant, invoice, organization=None):
+def send_invoice_notification(tenant, invoice, organization=None, use_template=True):
     """
     Send notification when a new invoice is generated.
     """
@@ -1057,30 +1143,54 @@ def send_invoice_notification(tenant, invoice, organization=None):
     
     organization = organization or resolve_organization()
     
-    body = (
-        f"Hello {tenant.tenant_name},\n\n"
-        f"📄 Your invoice for this month is ready.\n\n"
-        f"Invoice: {inv_id}\n"
-        f"💰 Amount: KES {flt(amount):,.0f}\n"
-        f"📅 Due: {due_date}\n\n"
-        f"Tap 'Pay Now' to pay via M-Pesa."
-    )
+    # Format values
+    tenant_name = tenant.tenant_name or tenant.name
+    amount_str = f"{flt(amount):,.0f}"
+    due_date_str = str(due_date) if due_date else "N/A"
     
-    buttons = [
-        {"id": f"pay_stk_{inv_id}", "title": "Pay Now"},
-        {"id": "contact_support", "title": "Contact Support"}
-    ]
-    
-    return send_interactive_buttons(
-        phone=phone,
-        header_text="📄 Invoice Ready",
-        body_text=body,
-        buttons=buttons,
-        organization=organization,
-        footer_text="Nest Property Management",
-        ref_doctype="Property Invoice" if frappe.db.exists("Property Invoice", invoice) else "Sales Invoice",
-        ref_name=invoice
-    )
+    if use_template:
+        return send_template_message(
+            phone=phone,
+            template_name=TEMPLATE_INVOICE_READY,
+            language_code="en",
+            components=[
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": tenant_name},   # {{1}} name
+                        {"type": "text", "text": inv_id},        # {{2}} invoice_id
+                        {"type": "text", "text": amount_str},    # {{3}} amount
+                        {"type": "text", "text": due_date_str}   # {{4}} due_date
+                    ]
+                }
+            ],
+            organization=organization
+        )
+    else:
+        body = (
+            f"Hello {tenant_name},\n\n"
+            f"📄 Your invoice for this month is ready.\n\n"
+            f"Invoice: {inv_id}\n"
+            f"💰 Amount: KES {amount_str}\n"
+            f"📅 Due: {due_date_str}\n\n"
+            f"Tap 'Pay Now' to pay via M-Pesa."
+        )
+        
+        buttons = [
+            {"id": f"pay_stk_{inv_id}", "title": "Pay Now"},
+            {"id": "contact_support", "title": "Contact Support"}
+        ]
+        
+        return send_interactive_buttons(
+            phone=phone,
+            header_text="📄 Invoice Ready",
+            body_text=body,
+            buttons=buttons,
+            organization=organization,
+            footer_text="NEST@R Property",
+            ref_doctype="Property Invoice" if frappe.db.exists("Property Invoice", invoice) else "Sales Invoice",
+            ref_name=invoice
+        )
 
 
 # ---------------------------------------------------------------------------
