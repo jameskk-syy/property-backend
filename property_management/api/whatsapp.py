@@ -115,12 +115,129 @@ def _update_message_status(wamid, status, error=None):
 
 
 # ---------------------------------------------------------------------------
-# Meta Cloud API - Send Messages
+# WhatsApp API - Send Messages (supports WAClient and Meta Cloud API)
 # ---------------------------------------------------------------------------
+
+def _send_to_waclient(instance_id, access_token, phone, message, base_url=None):
+    """
+    Send a message via WAClient API.
+    https://api.waclient.com/send
+    
+    Returns the API response dict.
+    """
+    import requests
+    
+    base = (base_url or "https://api.waclient.com").rstrip("/")
+    url = f"{base}/send"
+    
+    payload = {
+        "number": phone,
+        "type": "text",
+        "message": message,
+        "instance_id": instance_id,
+        "access_token": access_token
+    }
+    
+    headers = {"Content-Type": "application/json"}
+    
+    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    
+    # Handle response
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"raw_response": resp.text}
+    
+    if resp.status_code >= 400:
+        error_msg = data.get("message", data.get("error", resp.text))
+        raise Exception(f"WAClient API error: {error_msg}")
+    
+    return data
+
+
+def _send_to_waclient_buttons(instance_id, access_token, phone, caption, footer, buttons, base_url=None):
+    """
+    Send a button message via WAClient API.
+    https://api.waclient.com/send
+    
+    Args:
+        buttons: List of dicts with 'index', 'quickReplyButton': {'display_text': ..., 'id': ...}
+    
+    Returns the API response dict.
+    """
+    import requests
+    
+    base = (base_url or "https://api.waclient.com").rstrip("/")
+    url = f"{base}/send"
+    
+    payload = {
+        "number": phone,
+        "type": "button",
+        "message": {
+            "caption": caption,
+            "footer": footer or "",
+            "templateButtons": buttons
+        },
+        "instance_id": instance_id,
+        "access_token": access_token
+    }
+    
+    headers = {"Content-Type": "application/json"}
+    
+    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"raw_response": resp.text}
+    
+    if resp.status_code >= 400:
+        error_msg = data.get("message", data.get("error", resp.text))
+        raise Exception(f"WAClient API error: {error_msg}")
+    
+    return data
+
+
+def _send_to_waclient_media(instance_id, access_token, phone, message, media_url, base_url=None):
+    """
+    Send a media message via WAClient API.
+    https://api.waclient.com/send
+    
+    Returns the API response dict.
+    """
+    import requests
+    
+    base = (base_url or "https://api.waclient.com").rstrip("/")
+    url = f"{base}/send"
+    
+    payload = {
+        "number": phone,
+        "type": "media",
+        "message": message or "",
+        "media_url": media_url,
+        "instance_id": instance_id,
+        "access_token": access_token
+    }
+    
+    headers = {"Content-Type": "application/json"}
+    
+    resp = requests.post(url, headers=headers, json=payload, timeout=30)
+    
+    try:
+        data = resp.json()
+    except Exception:
+        data = {"raw_response": resp.text}
+    
+    if resp.status_code >= 400:
+        error_msg = data.get("message", data.get("error", resp.text))
+        raise Exception(f"WAClient API error: {error_msg}")
+    
+    return data
+
 
 def _send_to_meta(phone_number_id, access_token, payload, base_url=None):
     """
-    Send a message via Meta Cloud API.
+    Send a message via Meta Cloud API (direct).
     Returns the API response dict with message ID.
     """
     import requests
@@ -145,7 +262,8 @@ def _send_to_meta(phone_number_id, access_token, payload, base_url=None):
 
 def send_text_message(phone, message, organization=None):
     """
-    Send a plain text message via WhatsApp Cloud API.
+    Send a plain text message via WhatsApp.
+    Supports both WAClient and Meta Cloud API based on provider setting.
     
     Args:
         phone: Recipient phone number
@@ -164,29 +282,50 @@ def send_text_message(phone, message, organization=None):
         _log_message(organization, phone, "text", message, status="Sent")
         return {"status": "logged", "message": "WhatsApp not configured, message logged only"}
     
-    if not (doc.get("whatsapp_phone_number_id") and token):
-        raise frappe.ValidationError("WhatsApp credentials incomplete")
-    
     phone_normalized = _normalize_phone(phone)
-    
-    payload = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": phone_normalized,
-        "type": "text",
-        "text": {"body": message}
-    }
+    provider = doc.get("whatsapp_provider", "").strip()
     
     try:
-        resp = _send_to_meta(
-            doc.get("whatsapp_phone_number_id"),
-            token,
-            payload,
-            doc.get("whatsapp_base_url")
-        )
-        wamid = resp.get("messages", [{}])[0].get("id")
-        _log_message(organization, phone, "text", message, status="Sent", wamid=wamid)
-        return {"status": "sent", "message_id": wamid}
+        # Use WAClient API
+        if provider == "WAClient":
+            instance_id = doc.get("whatsapp_instance_id")
+            if not (instance_id and token):
+                raise frappe.ValidationError("WAClient credentials incomplete (need instance_id and access_token)")
+            
+            resp = _send_to_waclient(
+                instance_id=instance_id,
+                access_token=token,
+                phone=phone_normalized,
+                message=message,
+                base_url=doc.get("whatsapp_base_url")
+            )
+            wamid = resp.get("id") or resp.get("message_id") or resp.get("msgId")
+            _log_message(organization, phone, "text", message, status="Sent", wamid=wamid)
+            return {"status": "sent", "message_id": wamid, "response": resp}
+        
+        # Use Meta Cloud API (direct)
+        else:
+            if not (doc.get("whatsapp_phone_number_id") and token):
+                raise frappe.ValidationError("WhatsApp credentials incomplete")
+            
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": phone_normalized,
+                "type": "text",
+                "text": {"body": message}
+            }
+            
+            resp = _send_to_meta(
+                doc.get("whatsapp_phone_number_id"),
+                token,
+                payload,
+                doc.get("whatsapp_base_url")
+            )
+            wamid = resp.get("messages", [{}])[0].get("id")
+            _log_message(organization, phone, "text", message, status="Sent", wamid=wamid)
+            return {"status": "sent", "message_id": wamid}
+    
     except Exception as e:
         _log_message(organization, phone, "text", message, status="Failed", error=str(e))
         raise
@@ -283,57 +422,87 @@ def send_interactive_buttons(phone, header_text, body_text, buttons, organizatio
                      ref_doctype=ref_doctype, ref_name=ref_name)
         return {"status": "logged", "message": "WhatsApp not configured, message logged only"}
     
-    if not (doc.get("whatsapp_phone_number_id") and token):
-        raise frappe.ValidationError("WhatsApp credentials incomplete")
-    
     phone_normalized = _normalize_phone(phone)
-    
-    # Build button objects
-    button_objects = []
-    for btn in (buttons or [])[:3]:  # Max 3 buttons
-        button_objects.append({
-            "type": "reply",
-            "reply": {
-                "id": btn.get("id", "")[:256],
-                "title": btn.get("title", "")[:20]
-            }
-        })
-    
-    payload = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": phone_normalized,
-        "type": "interactive",
-        "interactive": {
-            "type": "button",
-            "body": {"text": body_text[:1024]},
-            "action": {"buttons": button_objects}
-        }
-    }
-    
-    # Add optional header
-    if header_text:
-        payload["interactive"]["header"] = {
-            "type": "text",
-            "text": header_text[:60]
-        }
-    
-    # Add optional footer
-    if footer_text:
-        payload["interactive"]["footer"] = {"text": footer_text[:60]}
+    provider = doc.get("whatsapp_provider", "").strip()
     
     try:
-        resp = _send_to_meta(
-            doc.get("whatsapp_phone_number_id"),
-            token,
-            payload,
-            doc.get("whatsapp_base_url")
-        )
-        wamid = resp.get("messages", [{}])[0].get("id")
-        content = f"{header_text or ''}\n\n{body_text}"
-        _log_message(organization, phone, "interactive", content, status="Sent", wamid=wamid,
-                     ref_doctype=ref_doctype, ref_name=ref_name)
-        return {"status": "sent", "message_id": wamid}
+        # Use WAClient API
+        if provider == "WAClient":
+            instance_id = doc.get("whatsapp_instance_id")
+            if not (instance_id and token):
+                raise frappe.ValidationError("WAClient credentials incomplete")
+            
+            # Build WAClient button format
+            template_buttons = []
+            for idx, btn in enumerate((buttons or [])[:3], start=1):
+                template_buttons.append({
+                    "index": idx,
+                    "quickReplyButton": {
+                        "display_text": btn.get("title", "")[:20],
+                        "id": btn.get("id", "")
+                    }
+                })
+            
+            resp = _send_to_waclient_buttons(
+                instance_id=instance_id,
+                access_token=token,
+                phone=phone_normalized,
+                caption=body_text[:1024],
+                footer=footer_text[:60] if footer_text else "",
+                buttons=template_buttons,
+                base_url=doc.get("whatsapp_base_url")
+            )
+            wamid = resp.get("id") or resp.get("message_id") or resp.get("msgId")
+            content = f"{header_text or ''}\n\n{body_text}"
+            _log_message(organization, phone, "interactive", content, status="Sent", wamid=wamid,
+                         ref_doctype=ref_doctype, ref_name=ref_name)
+            return {"status": "sent", "message_id": wamid, "response": resp}
+        
+        # Use Meta Cloud API (direct)
+        else:
+            if not (doc.get("whatsapp_phone_number_id") and token):
+                raise frappe.ValidationError("WhatsApp credentials incomplete")
+            
+            # Build button objects for Meta API
+            button_objects = []
+            for btn in (buttons or [])[:3]:
+                button_objects.append({
+                    "type": "reply",
+                    "reply": {
+                        "id": btn.get("id", "")[:256],
+                        "title": btn.get("title", "")[:20]
+                    }
+                })
+            
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": phone_normalized,
+                "type": "interactive",
+                "interactive": {
+                    "type": "button",
+                    "body": {"text": body_text[:1024]},
+                    "action": {"buttons": button_objects}
+                }
+            }
+            
+            if header_text:
+                payload["interactive"]["header"] = {"type": "text", "text": header_text[:60]}
+            if footer_text:
+                payload["interactive"]["footer"] = {"text": footer_text[:60]}
+            
+            resp = _send_to_meta(
+                doc.get("whatsapp_phone_number_id"),
+                token,
+                payload,
+                doc.get("whatsapp_base_url")
+            )
+            wamid = resp.get("messages", [{}])[0].get("id")
+            content = f"{header_text or ''}\n\n{body_text}"
+            _log_message(organization, phone, "interactive", content, status="Sent", wamid=wamid,
+                         ref_doctype=ref_doctype, ref_name=ref_name)
+            return {"status": "sent", "message_id": wamid}
+    
     except Exception as e:
         _log_message(organization, phone, "interactive", body_text, status="Failed",
                      error=str(e), ref_doctype=ref_doctype, ref_name=ref_name)
