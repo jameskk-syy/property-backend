@@ -113,11 +113,27 @@ def _resolve_company(company=None, organization=None, property=None):
 	return company, organization
 
 
+def _coerce_bool(value, default=True):
+	"""Interpret a JS/JSON truthiness value (True/False, 1/0, 'yes'/'no', 'true'/'false')."""
+	if value is None:
+		return default
+	if isinstance(value, bool):
+		return value
+	if isinstance(value, (int, float)):
+		return value != 0
+	s = str(value).strip().lower()
+	if s in ("1", "true", "yes", "y", "on"):
+		return True
+	if s in ("0", "false", "no", "n", "off", ""):
+		return False
+	return default
+
+
 def _create_one_employee(employee_name, gross_salary, company, organization=None, property=None,
 						  designation="Office Staff", mpesa_phone=None, national_id=None,
-						  bonus_deposit=None):
+						  bonus_deposit=None, apply_deductions=True):
 	"""Create the HRMS Employee and set the app's extra fields (national_id,
-	bonus_deposit). Returns the employee name."""
+	bonus_deposit, apply_deductions). Returns the employee name."""
 	from property_management.integration.payroll import create_employee as _create
 	name = _create(
 		employee_name=employee_name, company=company, gross_salary=float(gross_salary or 0),
@@ -133,6 +149,8 @@ def _create_one_employee(employee_name, gross_salary, company, organization=None
 			updates["bonus_deposit"] = float(bonus_deposit)
 		except (TypeError, ValueError):
 			pass
+	# Always set the deductions flag explicitly so it's deterministic per employee.
+	updates["apply_deductions"] = 1 if _coerce_bool(apply_deductions, default=True) else 0
 	if updates:
 		frappe.db.set_value("Employee", name, updates, update_modified=False)
 	return name
@@ -142,11 +160,14 @@ def _create_one_employee(employee_name, gross_salary, company, organization=None
 @envelope
 def create_employee(employee_name, gross_salary, company=None, organization=None, property=None,
 					designation="Office Staff", mpesa_phone=None, national_id=None,
-					bonus_deposit=None):
+					bonus_deposit=None, apply_deductions=True):
 	"""Create an HRMS Employee for a caretaker / office / construction worker.
 
 	Company may be omitted and is then resolved from the organization (or the
 	property's organization), so the frontend only needs to pass organization.
+
+	apply_deductions (default True): when False, payroll deducts nothing for this
+	employee (net pay = gross salary).
 	"""
 	company, organization = _resolve_company(company, organization, property)
 	if not company:
@@ -156,6 +177,7 @@ def create_employee(employee_name, gross_salary, company=None, organization=None
 		employee_name=employee_name, gross_salary=gross_salary, company=company,
 		organization=organization, property=property, designation=designation,
 		mpesa_phone=mpesa_phone, national_id=national_id, bonus_deposit=bonus_deposit,
+		apply_deductions=apply_deductions,
 	)
 	return {"employee": name}
 
@@ -202,6 +224,7 @@ def bulk_create_employees(employees, company=None, organization=None):
 				mpesa_phone=row.get("mpesa_phone") or row.get("phone") or None,
 				national_id=row.get("national_id") or None,
 				bonus_deposit=row.get("bonus_deposit") if row.get("bonus_deposit") not in (None, "") else None,
+				apply_deductions=row.get("apply_deductions", True),
 			)
 			created.append(emp)
 		except Exception as e:

@@ -309,44 +309,56 @@ def download_my_lease(lease):
 
 
 # --------------------------------------------------------------------------
-# Complaints — the tenant raises maintenance/service complaints; admin sees them
+# Feedback — tenant or caretaker raises feedback; admin/caretaker can respond
 # --------------------------------------------------------------------------
 
 @frappe.whitelist()
-def raise_complaint(subject, description, category=None, priority="Medium", photo=None):
+def raise_complaint(subject=None, description=None, category=None, priority="Medium", photo=None, feedback=None):
 	"""
-	Raise a complaint for the logged-in tenant. Property/unit are derived from the
+	Raise feedback for the logged-in tenant. Property/unit are derived from the
 	tenant's active lease, and organization auto-sets via the before_insert hook.
+	
+	Accepts either old format (subject+description) or new format (feedback).
 	"""
 	tenant = _current_tenant()
-	if not subject or not description:
-		frappe.throw("Please provide a subject and a description.")
+	
+	# Support both old format (subject+description) and new format (feedback)
+	feedback_text = feedback or ""
+	if not feedback_text and subject:
+		feedback_text = f"{subject}\n\n{description or ''}" if description else subject
+	
+	if not feedback_text.strip():
+		frappe.throw("Please provide your feedback.")
 
 	le = _active_lease(tenant)
+	tenant_doc = frappe.get_doc("Property Tenant", tenant)
+	
 	doc = frappe.get_doc({
 		"doctype": "Tenant Complaint",
+		"raised_by_type": "Tenant",
+		"raised_by_user": frappe.session.user,
 		"tenant": tenant,
-		"tenant_name": _tenant_name(tenant),
+		"tenant_name": tenant_doc.tenant_name or tenant,
+		"mobile_number": tenant_doc.phone or "",
 		"property": le.property if le else None,
 		"unit": le.unit if le else None,
 		"category": category or "General",
 		"priority": priority or "Medium",
-		"subject": subject,
-		"description": description,
+		"feedback": feedback_text.strip(),
 		"photo": photo or None,
 		"status": "Open",
 	})
 	doc.insert(ignore_permissions=True)
-	return {"complaint": doc.name, "status": doc.status}
+	return {"feedback": doc.name, "status": doc.status}
 
 
 @frappe.whitelist()
 def my_complaints():
-	"""All complaints raised by the logged-in tenant, newest first."""
+	"""All feedback raised by the logged-in tenant, newest first."""
 	tenant = _current_tenant()
 	rows = frappe.get_all(
 		"Tenant Complaint", filters={"tenant": tenant},
-		fields=["name", "subject", "description", "category", "priority", "status",
+		fields=["name", "feedback", "category", "priority", "status",
 				"property", "unit", "admin_response", "responded_at", "creation"],
 		order_by="creation desc",
 	)
@@ -356,8 +368,7 @@ def my_complaints():
 		unit_no = frappe.db.get_value("Property Unit", r.unit, "unit_number") if r.unit else ""
 		out.append({
 			"id": r.name,
-			"subject": r.subject,
-			"description": r.description,
+			"feedback": r.feedback or "",
 			"category": r.category or "General",
 			"priority": r.priority or "Medium",
 			"status": r.status or "Open",

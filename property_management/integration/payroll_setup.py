@@ -259,6 +259,18 @@ def apply_statutory_deductions(doc, method=None):
 	if gross <= 0:
 		return
 
+	# Per-employee opt-out: when apply_deductions is off, deduct nothing so that
+	# net pay == gross. The field defaults to 1 (deduct), and is treated as ON if
+	# the custom field doesn't exist yet (pre-migrate), preserving prior behaviour.
+	apply = frappe.db.get_value("Employee", doc.employee, "apply_deductions")
+	if apply is not None and not int(apply or 0):
+		for d in doc.get("deductions", []):
+			d.amount = 0
+		doc.total_deduction = 0
+		doc.net_pay = float(gross)
+		doc.rounded_total = round(float(gross))
+		return
+
 	calc = compute_statutory(gross)
 	mapping = {
 		"NSSF": calc["nssf"],

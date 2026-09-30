@@ -4,14 +4,16 @@
 """
 Monthly billing.
 
-For each active lease, generate ONE combined Sales Invoice per month:
-  - Rent               (from the lease)
-  - Garbage            (flat effective charge, if configured)
-  - Water/Electricity  (metered consumption billed during the month)
+For each active lease, generate TWO separate Sales Invoices per month:
+  - Rent invoice     (PM-MONTHLY): rent from the lease. Reminders + late fees
+                     apply to this invoice only.
+  - Utility invoice  (PM-UTILITY): garbage (flat effective charge, if configured)
+                     + water/electricity (metered consumption during the month).
+                     No late fees apply to utilities.
 
-The invoice due date is derived from the property's rent settings
+Both invoices' due dates are derived from the property's rent settings
 (`rent_due_day` + `late_fee_grace_days`). No utility charges are raised at
-onboarding; utilities only appear on the monthly invoice once metered.
+onboarding; utilities only appear on the utility invoice once metered/configured.
 """
 
 import contextlib
@@ -43,21 +45,27 @@ def _period_bounds(period):
 
 def _due_date(property_name, organization, end_date):
 	"""
-	Compute the invoice due date from settings: the rent_due_day of the billing
-	month + grace days. Falls back to end_of_month + 5.
+	Compute the invoice due date from settings: `rent_due_day` of the month
+	FOLLOWING the billing period, plus grace days. Invoices post on the last day of
+	the billing period, so the due date must land in the next month (never before
+	the posting date, which ERPNext rejects). Falls back to end_of_period + 5.
 	"""
 	from property_management.api.settings import _effective_settings
 	s = _effective_settings(property=property_name, organization=organization)
 	due_day = int(s.get("rent_due_day") or 5)
 	grace = int(s.get("late_fee_grace_days") or 0)
-	# Due day is within the month following the billing period start.
+	# Posting date is the period end; due date is rent_due_day of the NEXT month.
 	base = getdate(end_date)
+	first_of_next_month = add_days(base, 1)  # end-of-month + 1 day = 1st of next month
 	try:
-		due = base.replace(day=min(due_day, 28))
+		due = first_of_next_month.replace(day=min(due_day, 28))
 	except Exception:
-		due = base
+		due = add_days(base, 5)
 	if grace:
 		due = add_days(due, grace)
+	# Safety net: never allow a due date before the posting date.
+	if getdate(due) < base:
+		due = add_days(base, 5)
 	return due
 
 
@@ -76,18 +84,37 @@ def _metered_amount(unit, utility_type, start, end):
 
 
 def build_invoice_lines(lease, start, end, settings):
-	"""Return the combined invoice line items for a lease for the period."""
+	"""
+	Return ALL invoice line items for a lease for the period (rent + utilities).
+
+	Kept for backward compatibility. Monthly billing now bills rent and utilities
+	on separate invoices via build_rent_lines() and build_utility_lines().
+	"""
+	return build_rent_lines(lease, start, end, settings) + build_utility_lines(lease, start, end, settings)
+
+
+def build_rent_lines(lease, start, end, settings):
+	"""Return the rent-only invoice line items for a lease for the period."""
 	lines = []
-	# 1. Rent
 	if flt(lease.rent_amount) > 0:
 		lines.append({"item_name": "Rent", "description": f"Monthly Rent ({start} to {end})",
 					  "quantity": 1, "rate": flt(lease.rent_amount)})
-	# 2. Garbage (flat effective charge)
+	return lines
+
+
+def build_utility_lines(lease, start, end, settings):
+	"""
+	Return the utility invoice line items for a lease for the period:
+	garbage (flat) + metered water/electricity. No utility line is added unless it
+	is configured (garbage) or has been metered (water/electricity) for the month.
+	"""
+	lines = []
+	# Garbage (flat effective charge)
 	garbage = flt(settings.get("garbage_charge"))
 	if garbage > 0:
 		lines.append({"item_name": "Garbage", "description": "Garbage / refuse collection",
 					  "quantity": 1, "rate": garbage})
-	# 3. Metered utilities for the month.
+	# Metered utilities for the month.
 	for utility in ("Water", "Electricity"):
 		amt = _metered_amount(lease.unit, utility, start, end)
 		if amt > 0:
@@ -99,12 +126,20 @@ def build_invoice_lines(lease, start, end, settings):
 @frappe.whitelist()
 def generate_monthly_invoices(period=None, organization=None, property=None):
 	"""
-	Generate combined monthly invoices for every active lease in scope. Returns a
-	summary. Idempotent per (lease, period): skips leases already invoiced for the
-	month (tracked via the Sales Invoice remarks tag).
+	Generate monthly invoices for every active lease in scope. Rent and utilities
+	are billed SEPARATELY:
+	  - Rent      -> its own Sales Invoice, tagged `PM-MONTHLY:` (reminders + late
+	                 fees apply to this invoice).
+	  - Utilities -> a second Sales Invoice combining garbage + water + electricity,
+	                 tagged `PM-UTILITY:` (no late fees; utilities only appear once
+	                 configured/metered for the month).
+
+	Returns a summary. Idempotent per (lease, period, kind): skips a lease's rent or
+	utility invoice if one already exists for the month (tracked via remarks tags).
 	"""
 	start, end = _period_bounds(period)
-	tag = f"PM-MONTHLY:{start}"
+	rent_tag = f"PM-MONTHLY:{start}"
+	utility_tag = f"PM-UTILITY:{start}"
 
 	lease_filters = {"status": "Active"}
 	if organization:
@@ -120,35 +155,50 @@ def generate_monthly_invoices(period=None, organization=None, property=None):
 	from property_management.integration.invoicing import create_sales_invoice
 	from property_management.api.settings import _effective_settings
 
+	def _already_invoiced(lease_name, prop, tag):
+		return bool(frappe.db.exists("Sales Invoice", {
+			"property_ref": prop,
+			"remarks": ["like", f"%{tag}:{lease_name}%"],
+			"docstatus": ["<", 2],
+		}))
+
 	created, skipped, failed = [], [], []
 	with _as_system_user():
 		for lease in leases:
+			lease = frappe._dict(lease)
 			try:
-				# Skip if already invoiced this month for this lease.
-				existing = frappe.db.exists("Sales Invoice", {
-					"property_ref": lease.property,
-					"remarks": ["like", f"%{tag}:{lease.name}%"],
-					"docstatus": ["<", 2],
-				})
-				if existing:
-					skipped.append(lease.name)
-					continue
-
 				settings = _effective_settings(property=lease.property, organization=lease.organization)
-				lines = build_invoice_lines(frappe._dict(lease), start, end, settings)
-				if not lines:
-					skipped.append(lease.name)
-					continue
-
 				due = _due_date(lease.property, lease.organization, end)
-				si_name = create_sales_invoice(
-					property_name=lease.property, tenant=lease.tenant, items=lines,
-					invoice_type="Rent", posting_date=str(end), due_date=str(due), submit=True,
-				)
-				# Tag for idempotency + traceability.
-				frappe.db.set_value("Sales Invoice", si_name, "remarks",
-									f"{tag}:{lease.name}", update_modified=False)
-				created.append({"lease": lease.name, "sales_invoice": si_name, "due_date": str(due)})
+				made_any = False
+
+				# 1. Rent invoice (PM-MONTHLY): reminders + late fees apply here.
+				rent_lines = build_rent_lines(lease, start, end, settings)
+				if rent_lines and not _already_invoiced(lease.name, lease.property, rent_tag):
+					rent_si = create_sales_invoice(
+						property_name=lease.property, tenant=lease.tenant, items=rent_lines,
+						invoice_type="Rent", posting_date=str(end), due_date=str(due), submit=True,
+					)
+					frappe.db.set_value("Sales Invoice", rent_si, "remarks",
+										f"{rent_tag}:{lease.name}", update_modified=False)
+					created.append({"lease": lease.name, "kind": "rent",
+									"sales_invoice": rent_si, "due_date": str(due)})
+					made_any = True
+
+				# 2. Utilities invoice (PM-UTILITY): garbage + water + electricity. No late fees.
+				utility_lines = build_utility_lines(lease, start, end, settings)
+				if utility_lines and not _already_invoiced(lease.name, lease.property, utility_tag):
+					util_si = create_sales_invoice(
+						property_name=lease.property, tenant=lease.tenant, items=utility_lines,
+						invoice_type="Utility", posting_date=str(end), due_date=str(due), submit=True,
+					)
+					frappe.db.set_value("Sales Invoice", util_si, "remarks",
+										f"{utility_tag}:{lease.name}", update_modified=False)
+					created.append({"lease": lease.name, "kind": "utility",
+									"sales_invoice": util_si, "due_date": str(due)})
+					made_any = True
+
+				if not made_any:
+					skipped.append(lease.name)
 			except Exception as e:
 				failed.append({"lease": lease.name, "error": str(e)})
 				frappe.log_error(title="monthly invoice failed", message=frappe.get_traceback())

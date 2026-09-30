@@ -7,17 +7,21 @@
  "engine": "InnoDB",
  "field_order": [
   "organization",
+  "raised_by_type",
+  "raised_by_user",
   "tenant",
   "tenant_name",
+  "mobile_number",
   "property",
   "unit",
   "column_break_1",
+  "caretaker",
+  "caretaker_name",
   "category",
   "priority",
   "status",
   "section_details",
-  "subject",
-  "description",
+  "feedback",
   "photo",
   "section_response",
   "admin_response",
@@ -32,17 +36,37 @@
    "options": "Organization"
   },
   {
+   "default": "Tenant",
+   "fieldname": "raised_by_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Raised By",
+   "options": "Tenant\nCaretaker",
+   "reqd": 1
+  },
+  {
+   "fieldname": "raised_by_user",
+   "fieldtype": "Link",
+   "label": "Raised By User",
+   "options": "User",
+   "read_only": 1
+  },
+  {
    "fieldname": "tenant",
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Tenant",
-   "options": "Property Tenant",
-   "reqd": 1
+   "options": "Property Tenant"
   },
   {
    "fieldname": "tenant_name",
    "fieldtype": "Data",
    "label": "Tenant Name"
+  },
+  {
+   "fieldname": "mobile_number",
+   "fieldtype": "Data",
+   "label": "Mobile Number"
   },
   {
    "fieldname": "property",
@@ -60,6 +84,17 @@
   {
    "fieldname": "column_break_1",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "caretaker",
+   "fieldtype": "Link",
+   "label": "Caretaker",
+   "options": "Property Caretaker"
+  },
+  {
+   "fieldname": "caretaker_name",
+   "fieldtype": "Data",
+   "label": "Caretaker Name"
   },
   {
    "default": "General",
@@ -88,19 +123,12 @@
   {
    "fieldname": "section_details",
    "fieldtype": "Section Break",
-   "label": "Complaint"
+   "label": "Feedback"
   },
   {
-   "fieldname": "subject",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Subject",
-   "reqd": 1
-  },
-  {
-   "fieldname": "description",
+   "fieldname": "feedback",
    "fieldtype": "Small Text",
-   "label": "Description",
+   "label": "Feedback",
    "reqd": 1
   },
   {
@@ -111,7 +139,7 @@
   {
    "fieldname": "section_response",
    "fieldtype": "Section Break",
-   "label": "Management Response"
+   "label": "Response"
   },
   {
    "fieldname": "admin_response",
@@ -134,7 +162,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-19 00:00:00.000000",
+ "modified": "2026-09-30 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Property Management",
  "name": "Tenant Complaint",

@@ -99,6 +99,8 @@ fixtures = [
 			"Purchase Invoice-property_ref", "Purchase Invoice-property_expense_ref",
 			"Employee-property_ref", "Employee-organization_ref",
 			"Employee-gross_salary", "Employee-mpesa_phone",
+			"Employee-national_id", "Employee-bonus_deposit",
+			"Employee-apply_deductions",
 			"Project-property_ref", "Project-construction_project_ref",
 		]]],
 	},

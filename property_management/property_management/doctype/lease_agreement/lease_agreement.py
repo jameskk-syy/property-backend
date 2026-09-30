@@ -57,6 +57,11 @@ class LeaseAgreement(Document):
 		if self.end_date and self.start_date and self.end_date <= self.start_date:
 			frappe.throw("End date must be after start date.")
 
+		# Initialise the running deposit balance from the deposit paid. Only seeds
+		# when unset so repair deductions (which lower deposit_balance) are preserved.
+		if self.get("deposit_balance") in (None, 0) and flt(self.deposit_amount) > 0:
+			self.deposit_balance = flt(self.deposit_amount)
+
 	def on_update(self):
 		if self.unit:
 			unit_doc = frappe.get_doc("Property Unit", self.unit)

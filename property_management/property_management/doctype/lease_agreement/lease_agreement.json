@@ -16,6 +16,9 @@
   "end_date",
   "rent_amount",
   "deposit_amount",
+  "deposit_balance",
+  "water_deposit",
+  "electricity_deposit",
   "signature_image",
   "section_signatures",
   "tenant_signature",
@@ -99,6 +102,25 @@
    "fieldtype": "Currency",
    "label": "Security Deposit Paid (KSh)",
    "reqd": 1
+  },
+  {
+   "fieldname": "deposit_balance",
+   "fieldtype": "Currency",
+   "label": "Deposit Balance (KSh)",
+   "read_only": 1,
+   "description": "Remaining deposit after any repair deductions. Initialised to the deposit paid."
+  },
+  {
+   "fieldname": "water_deposit",
+   "fieldtype": "Currency",
+   "label": "Water Deposit (KSh, non-refundable)",
+   "description": "Non-refundable water deposit. Stored as a record value only; not posted to accounting."
+  },
+  {
+   "fieldname": "electricity_deposit",
+   "fieldtype": "Currency",
+   "label": "Electricity Deposit (KSh, non-refundable)",
+   "description": "Non-refundable electricity deposit. Stored as a record value only; not posted to accounting."
   },
   {
    "fieldname": "signature_image",

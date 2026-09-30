@@ -164,6 +164,14 @@ INTEGRATION_CUSTOM_FIELDS = {
 			"fieldtype": "Currency",
 			"insert_after": "national_id",
 		},
+		{
+			"fieldname": "apply_deductions",
+			"label": "Apply Statutory Deductions",
+			"fieldtype": "Check",
+			"insert_after": "bonus_deposit",
+			"default": "1",
+			"description": "When unchecked, payroll deducts nothing for this employee (net pay = gross salary).",
+		},
 	],
 	"Project": [
 		{
@@ -184,9 +192,31 @@ INTEGRATION_CUSTOM_FIELDS = {
 }
 
 
+def backfill_lease_deposit_balance():
+	"""
+	Initialise Lease Agreement.deposit_balance for existing leases where it's not
+	set yet, so repair deductions have a starting balance. Idempotent: only fills
+	rows where deposit_balance is NULL/0 but a deposit_amount exists.
+	"""
+	if not frappe.db.has_column("Lease Agreement", "deposit_balance"):
+		return
+	leases = frappe.get_all(
+		"Lease Agreement",
+		filters={"deposit_amount": [">", 0]},
+		fields=["name", "deposit_amount", "deposit_balance"],
+	)
+	for le in leases:
+		if not le.get("deposit_balance"):
+			frappe.db.set_value("Lease Agreement", le["name"], "deposit_balance",
+								le["deposit_amount"], update_modified=False)
+	frappe.db.commit()
+
+
 def setup_integration_custom_fields():
 	"""Idempotently create all integration custom fields. Safe to run on every migrate."""
 	# Only add native-doctype fields if the target doctype exists (erpnext/hrms installed).
 	fields = {dt: defs for dt, defs in INTEGRATION_CUSTOM_FIELDS.items() if frappe.db.exists("DocType", dt)}
 	create_custom_fields(fields, ignore_validate=True)
 	frappe.db.commit()
+	# Seed deposit balances for pre-existing leases (safe to run every migrate).
+	backfill_lease_deposit_balance()

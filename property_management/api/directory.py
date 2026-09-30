@@ -1021,7 +1021,7 @@ def bulk_create_properties(properties, organization=None):
 
 @frappe.whitelist()
 @envelope
-def list_tenants(page=1, page_size=8, search=None, limit=None):
+def list_tenants(page=1, page_size=8, search=None, limit=None, property=None):
 	"""
 	List tenants with server-side pagination.
 	
@@ -1030,6 +1030,8 @@ def list_tenants(page=1, page_size=8, search=None, limit=None):
 		page_size: Records per page, default 8, max 100
 		search: Optional search term (searches name, phone, email)
 		limit: Deprecated - use page_size instead (kept for backward compatibility)
+		property: Optional Property filter. Restricts to tenants who have a lease
+			on that property (tenant->property link is via Lease Agreement).
 	
 	Returns:
 		{data: [...], pagination: {page, page_size, total, total_pages, has_next, has_prev}}
@@ -1048,6 +1050,16 @@ def list_tenants(page=1, page_size=8, search=None, limit=None):
 	# Build search filters
 	filters = {}
 	or_filters = None
+
+	# Property scope: tenants are linked to a property through their lease, so
+	# resolve the set of tenants leasing on this property and constrain by name.
+	if property:
+		leased_tenants = frappe.get_all(
+			'Lease Agreement', filters={'property': property}, pluck='tenant', distinct=True,
+		)
+		# Empty sentinel keeps the query valid (and correctly returns 0 rows) when
+		# no tenant leases on the property.
+		filters['name'] = ['in', leased_tenants or ['__none__']]
 	if search:
 		search_term = f'%{search}%'
 		or_filters = [
@@ -1202,7 +1214,8 @@ def _save_tenant_id_images(tenant_doc, front=None, back=None):
 @envelope
 def onboard_tenant(tenant_name=None, phone=None, email=None, national_id=None,
                    income_range=None, property=None, unit=None, rent=None,
-                   deposit=None, lease_start=None, lease_end=None,
+                   deposit=None, water_deposit=None, electricity_deposit=None,
+                   lease_start=None, lease_end=None,
                    tenant_signature=None, caretaker_signature=None,
                    signed_at=None, organization=None,
                    national_id_front=None, national_id_back=None, **kwargs):
@@ -1271,6 +1284,10 @@ def onboard_tenant(tenant_name=None, phone=None, email=None, national_id=None,
 			"end_date": end,
 			"rent_amount": _num(rent),
 			"deposit_amount": _num(deposit),
+			# Non-refundable utility deposits: stored as record values only, never
+			# posted to accounting and excluded from the initial amount due / STK total.
+			"water_deposit": _num(water_deposit),
+			"electricity_deposit": _num(electricity_deposit),
 			"tenant_signature": tenant_signature,
 			"caretaker_signature": caretaker_signature,
 			"signed_on": signed_on,
@@ -1473,6 +1490,7 @@ def my_tenants():
 @frappe.whitelist()
 @envelope
 def assign_tenant_to_unit(tenant, unit, property=None, rent=None, deposit=None,
+						  water_deposit=None, electricity_deposit=None,
 						  lease_start=None, lease_end=None,
 						  tenant_signature=None, caretaker_signature=None, signed_at=None):
 	"""
@@ -1502,6 +1520,9 @@ def assign_tenant_to_unit(tenant, unit, property=None, rent=None, deposit=None,
 
 	rent_amt = _num(rent) if rent not in (None, "") else _num(unit_doc.base_rent)
 	deposit_amt = _num(deposit) if deposit not in (None, "") else _num(unit_doc.security_deposit)
+	# Non-refundable utility deposits: stored as values only, excluded from GL + amount due.
+	water_dep = _num(water_deposit)
+	electricity_dep = _num(electricity_deposit)
 
 	lease = frappe.get_doc({
 		"doctype": "Lease Agreement",
@@ -1514,6 +1535,8 @@ def assign_tenant_to_unit(tenant, unit, property=None, rent=None, deposit=None,
 		"end_date": lease_end or frappe.utils.add_months(frappe.utils.nowdate(), 12),
 		"rent_amount": rent_amt,
 		"deposit_amount": deposit_amt,
+		"water_deposit": water_dep,
+		"electricity_deposit": electricity_dep,
 		"tenant_signature": tenant_signature,
 		"caretaker_signature": caretaker_signature,
 		"signed_on": _parse_datetime(signed_at),
@@ -1960,6 +1983,9 @@ def bulk_create_tenants(tenants, organization=None):
 				# Create/sign lease for this tenant
 				rent = flt(row.get("rent") or row.get("rent_amount") or 0)
 				deposit = flt(row.get("deposit") or row.get("deposit_amount") or 0)
+				# Non-refundable utility deposits: stored as values only (no GL impact).
+				water_deposit = flt(row.get("water_deposit") or 0)
+				electricity_deposit = flt(row.get("electricity_deposit") or 0)
 				
 				lease = _create_migration_lease(
 					tenant=doc.name,
@@ -1967,6 +1993,8 @@ def bulk_create_tenants(tenants, organization=None):
 					unit=unit,
 					rent=rent,
 					deposit=deposit,
+					water_deposit=water_deposit,
+					electricity_deposit=electricity_deposit,
 					organization=org,
 					already_paid=already_paid
 				)
@@ -1983,7 +2011,8 @@ def bulk_create_tenants(tenants, organization=None):
 	return {"created": created, "updated": updated, "failed": failed, "total": len(tenants)}
 
 
-def _create_migration_lease(tenant, property_name, unit, rent, deposit, organization, already_paid=False):
+def _create_migration_lease(tenant, property_name, unit, rent, deposit, organization,
+							water_deposit=0, electricity_deposit=0, already_paid=False):
 	"""Create a lease for a migrated tenant."""
 	from frappe.utils import today, add_years
 	
@@ -2010,6 +2039,10 @@ def _create_migration_lease(tenant, property_name, unit, rent, deposit, organiza
 		"unit": unit,
 		"rent_amount": rent,
 		"deposit_amount": deposit,
+		# Non-refundable utility deposits: stored as values only, never posted to GL
+		# and excluded from initial_amount_due / initial_amount_paid.
+		"water_deposit": flt(water_deposit),
+		"electricity_deposit": flt(electricity_deposit),
 		"start_date": today(),
 		"end_date": add_years(today(), 1),
 		"status": "Active",

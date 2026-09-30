@@ -76,11 +76,21 @@ def rent_collection_report(property=None, from_date=None, to_date=None, organiza
 
 @frappe.whitelist()
 @envelope
-def list_unreconciled(bank_account=None, limit=100):
-	"""List incoming (Credit) Bank Transactions that are not yet reconciled."""
+def list_unreconciled(bank_account=None, limit=100, property=None):
+	"""List incoming (Credit) Bank Transactions that are not yet reconciled.
+
+	property: optional Property filter. A Bank Transaction is linked to a property
+	through its bank_account, which matches the property's collection_account. When
+	a property is given we scope to that account (returns none if the property has
+	no collection account configured).
+	"""
 	filters = {"reconciled": 0, "direction": "Credit"}
 	if bank_account:
 		filters["bank_account"] = bank_account
+	if property:
+		collection_account = frappe.db.get_value("Property", property, "collection_account")
+		# No collection account => nothing can belong to this property yet.
+		filters["bank_account"] = collection_account or "__none__"
 
 	rows = frappe.get_all(
 		"Bank Transaction",

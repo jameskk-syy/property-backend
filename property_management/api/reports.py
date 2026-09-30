@@ -746,3 +746,459 @@ def _compute_dashboard_summary():
         "recent_payments": payments_list,
     }
 
+
+
+# ============================================================================
+# STRUCTURED FINANCIAL STATEMENTS
+#
+# Returns fully-structured statements (title + columns + rows) built from REAL
+# records so the frontend renders whatever the backend sends — no hardcoded
+# line items. Each row is:
+#   {"kind": "section|item|subtotal|total|grand|spacer",
+#    "label": str,
+#    "values": {colKey: number}}   # only for item/subtotal/total/grand rows
+#
+# kind = "financial_statement" report types:
+#   income_statement, balance_sheet, cashflow_statement,
+#   cost_tracking, loan_schedule, project_pipeline
+# ============================================================================
+
+from frappe.utils import get_first_day, get_last_day
+
+_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _row(kind, label="", values=None):
+    r = {"kind": kind, "label": label}
+    if values is not None:
+        r["values"] = values
+    return r
+
+
+def _year_bounds(year):
+    return f"{year}-01-01", f"{year}-12-31"
+
+
+def _month_bounds(year, month_index):
+    from datetime import date
+    start = date(year, month_index + 1, 1)
+    return str(get_first_day(start)), str(get_last_day(start))
+
+
+def _resolve_company_for_property(property=None):
+    """Company name for scoping Account lists, mirroring v2 resolution."""
+    company = None
+    if property:
+        org = frappe.db.get_value("Property", property, "organization")
+        if org:
+            company = frappe.db.get_value("Organization", org, "erpnext_company")
+    if not company:
+        try:
+            from property_management.api.utils import resolve_organization
+            org = resolve_organization()
+            company = frappe.db.get_value("Organization", org, "erpnext_company") if org else None
+        except Exception:
+            company = None
+    if not company:
+        companies = frappe.get_all("Company", pluck="name", limit=1)
+        company = companies[0] if companies else None
+    return company
+
+
+def _accounts_by_root(root_type, company=None):
+    filters = {"root_type": root_type, "is_group": 0}
+    if company:
+        filters["company"] = company
+    return frappe.get_all("Account", filters=filters, fields=["name", "account_name", "account_type"])
+
+
+def _gl_account_income_by_cc(account, from_date, to_date, cost_center):
+    """Credit-debit for one account within a cost center over a period."""
+    if not account or not cost_center:
+        return 0.0
+    filters = {"account": account, "is_cancelled": 0, "cost_center": cost_center}
+    if from_date and to_date:
+        filters["posting_date"] = ["between", [str(from_date), str(to_date)]]
+    rows = frappe.get_all("GL Entry", filters=filters, fields=["sum(credit) as c", "sum(debit) as d"])
+    if not rows:
+        return 0.0
+    return flt(rows[0].c) - flt(rows[0].d)
+
+
+def _gl_account_balance(account, from_date=None, to_date=None, cost_center=None, sign="debit"):
+    """Net balance for a single account. sign='debit' -> debit-credit, else credit-debit."""
+    filters = {"account": account, "is_cancelled": 0}
+    if from_date and to_date:
+        filters["posting_date"] = ["between", [str(from_date), str(to_date)]]
+    if cost_center:
+        filters["cost_center"] = cost_center
+    rows = frappe.get_all("GL Entry", filters=filters, fields=["sum(debit) as d", "sum(credit) as c"])
+    if not rows:
+        return 0.0
+    d, c = flt(rows[0].d), flt(rows[0].c)
+    return (d - c) if sign == "debit" else (c - d)
+
+
+# ---- Income Statement -------------------------------------------------------
+def _income_statement(property, year, months):
+    """
+    Rental income grouped per Property (real records), services + expenses from
+    the GL. Months across; each property is a line item under 'A - Rental Income'.
+    """
+    company = _resolve_company_for_property(property)
+    month_keys = _MONTHS[:months]
+    columns = [{"key": "label", "header": "", "kind": "label"}]
+    columns += [{"key": m, "header": m, "kind": "money"} for m in month_keys]
+
+    # Properties in scope (one line each).
+    prop_filters = {}
+    if property:
+        prop_filters["name"] = property
+    properties = frappe.get_all("Property", filters=prop_filters,
+                                fields=["name", "property_name", "cost_center", "rent_income_account", "utility_income_account"])
+
+    rows = [_row("section", "Revenues"), _row("section", "A - Rental Income")]
+
+    # Per-property monthly rental income. Prefer the property's COST CENTER, which
+    # captures rent posted to any income account tagged to that property (e.g.
+    # direct M-Pesa receipts that land on a shared "Rent Income" account but carry
+    # the property's cost center). Fall back to the dedicated rent_income_account
+    # only when the property has no cost center.
+    # Precompute, per property/month: total income (by cost center) and utility
+    # income (by cost center), so rental = total − utilities (no double counting).
+    rental_subtotal = {m: 0.0 for m in month_keys}
+    services_subtotal = {m: 0.0 for m in month_keys}
+    per_prop_util = {}  # property.name -> {month: utility_income}
+    for p in properties:
+        util_vals = {}
+        rent_vals = {}
+        cc = p.get("cost_center")
+        for mi, m in enumerate(month_keys):
+            fd, td = _month_bounds(year, mi)
+            total_inc = _gl_income(fd, td, cost_center=cc) if cc else (
+                _gl_account_balance(p["rent_income_account"], fd, td, sign="credit")
+                if p.get("rent_income_account") else 0.0)
+            util_inc = _gl_account_income_by_cc(p.get("utility_income_account"), fd, td, cc) if cc else 0.0
+            rent_inc = total_inc - util_inc
+            if rent_inc:
+                rent_vals[m] = rent_inc
+                rental_subtotal[m] += rent_inc
+            if util_inc:
+                util_vals[m] = util_inc
+                services_subtotal[m] += util_inc
+        per_prop_util[p["name"]] = util_vals
+        rows.append(_row("item", p.get("property_name") or p["name"], rent_vals))
+    rows.append(_row("subtotal", "Sub-Total", {k: v for k, v in rental_subtotal.items() if v}))
+
+    # Services income (utility income) — one line per property that has any.
+    rows.append(_row("spacer"))
+    rows.append(_row("section", "B - Services Income"))
+    for p in properties:
+        util_vals = per_prop_util.get(p["name"], {})
+        if util_vals:
+            rows.append(_row("item", "%s - Utilities" % (p.get("property_name") or p["name"]), util_vals))
+    rows.append(_row("subtotal", "Sub-Total", {k: v for k, v in services_subtotal.items() if v}))
+
+    # Operating revenue = rental + services.
+    op_rev = {}
+    for m in month_keys:
+        tot = rental_subtotal.get(m, 0.0) + services_subtotal.get(m, 0.0)
+        if tot:
+            op_rev[m] = tot
+    rows.append(_row("spacer"))
+    rows.append(_row("total", "Operating Revenue", op_rev))
+
+    # Expenses — real expense accounts from the GL, one line each.
+    rows.append(_row("spacer"))
+    rows.append(_row("section", "Expenses"))
+    rows.append(_row("section", "A - Rental Operating Costs"))
+    op_exp = {m: 0.0 for m in month_keys}
+    for acc in _accounts_by_root("Expense", company):
+        vals = {}
+        for mi, m in enumerate(month_keys):
+            fd, td = _month_bounds(year, mi)
+            cc = _get_property_cost_center(property) if property else None
+            amt = _gl_account_balance(acc["name"], fd, td, cost_center=cc, sign="debit")
+            if amt:
+                vals[m] = amt
+                op_exp[m] += amt
+        if vals:
+            rows.append(_row("item", acc.get("account_name") or acc["name"], vals))
+    rows.append(_row("total", "Operating Expenses", {k: v for k, v in op_exp.items() if v}))
+
+    # Revenue after expenses + profit.
+    net = {}
+    for m in month_keys:
+        n = op_rev.get(m, 0.0) - op_exp.get(m, 0.0)
+        if n:
+            net[m] = n
+    rows.append(_row("spacer"))
+    rows.append(_row("total", "Revenue", net))
+    rows.append(_row("spacer"))
+    rows.append(_row("section", "Financing Costs"))
+    rows.append(_row("total", "Profit Before Tax", net))
+    rows.append(_row("spacer"))
+    rows.append(_row("grand", "Profit", net))
+
+    return {"id": "income_statement", "title": f"INCOME STATEMENT \u2013 {year} (KShs.)",
+            "columns": columns, "rows": rows}
+
+
+# ---- Balance Sheet ----------------------------------------------------------
+def _balance_sheet(property, year):
+    """Assets / Liabilities / Equity per real GL account (mirrors v2 balance_sheet logic)."""
+    fd, td = _year_bounds(year)
+    company = _resolve_company_for_property(property)
+    cost_center = _get_property_cost_center(property) if property else None
+    columns = [{"key": "label", "header": "ASSETS", "kind": "label"},
+               {"key": "amount", "header": f"Yr {year} KShs.", "kind": "money"}]
+
+    def section_rows(root_type, sign, header):
+        out = [_row("section", header)]
+        total = 0.0
+        for acc in _accounts_by_root(root_type, company):
+            bal = _gl_account_balance(acc["name"], fd, td, cost_center=cost_center, sign=sign)
+            if abs(bal) > 0.005:
+                out.append(_row("item", acc.get("account_name") or acc["name"], {"amount": bal}))
+                total += bal
+        return out, total
+
+    asset_rows, total_assets = section_rows("Asset", "debit", "Non-Current Assets")
+    liab_rows, total_liab = section_rows("Liability", "credit", "Non-Current Liabilities")
+    equity_rows, total_equity = section_rows("Equity", "credit", "EQUITY")
+
+    # Net profit rolls into equity.
+    income_total = sum(_gl_account_balance(a["name"], fd, td, cost_center=cost_center, sign="credit")
+                       for a in _accounts_by_root("Income", company))
+    expense_total = sum(_gl_account_balance(a["name"], fd, td, cost_center=cost_center, sign="debit")
+                        for a in _accounts_by_root("Expense", company))
+    net_profit = income_total - expense_total
+    equity_total_final = total_equity + net_profit
+
+    rows = []
+    rows += asset_rows
+    rows.append(_row("total", "Total Assets", {"amount": total_assets}))
+    rows.append(_row("spacer"))
+    rows += equity_rows
+    if net_profit:
+        rows.append(_row("item", "Retained Earnings", {"amount": net_profit}))
+    rows.append(_row("total", "Total Equity", {"amount": equity_total_final}))
+    rows.append(_row("spacer"))
+    rows += liab_rows
+    rows.append(_row("subtotal", "Sub-Total", {"amount": total_liab}))
+    rows.append(_row("spacer"))
+    rows.append(_row("total", "Total Equity & Liabilities", {"amount": equity_total_final + total_liab}))
+
+    return {"id": "balance_sheet", "title": f"BALANCE SHEET \u2013 {year} (KShs.)",
+            "columns": columns, "rows": rows}
+
+
+# ---- Cashflow Statement -----------------------------------------------------
+def _cashflow_statement(property, year):
+    """Indirect-method operating cash from GL net profit; investing/financing left blank (no source doctypes)."""
+    fd, td = _year_bounds(year)
+    cost_center = _get_property_cost_center(property) if property else None
+    income = _gl_income(fd, td, cost_center=cost_center)
+    expense = _gl_expense(fd, td, cost_center=cost_center)
+    net_profit = income - expense
+
+    columns = [{"key": "label", "header": "", "kind": "label"},
+               {"key": "amount", "header": "", "kind": "money"}]
+    rows = [
+        _row("section", "Cashflow From Operating Activities"),
+        _row("item", "Cash Generated from Operations", {"amount": net_profit} if net_profit else {}),
+        _row("total", "Net cash generated from Operating Activities", {"amount": net_profit} if net_profit else {}),
+        _row("spacer"),
+        _row("section", "Cash from Investing Activities"),
+        _row("total", "Net Cash used in Investing Activities", {}),
+        _row("spacer"),
+        _row("section", "Cash from Financing Activities"),
+        _row("total", "Net Cash from Financing Activities", {}),
+        _row("spacer"),
+        _row("total", "Net increase/decrease in Cash and cash equivalents", {"amount": net_profit} if net_profit else {}),
+    ]
+    return {"id": "cashflow_statement", "title": f"CASHFLOW STATEMENT \u2013 {year} (KShs.)",
+            "columns": columns, "rows": rows}
+
+
+# ---- Cost Tracking ----------------------------------------------------------
+def _cost_tracking(property, year):
+    """Monthly expense per GL expense account + Totals column. All real GL data."""
+    company = _resolve_company_for_property(property)
+    cost_center = _get_property_cost_center(property) if property else None
+    columns = [{"key": "label", "header": "Operating Costs", "kind": "label"}]
+    columns += [{"key": m, "header": m, "kind": "money"} for m in _MONTHS]
+    columns.append({"key": "total", "header": "Totals", "kind": "money", "emphasise": True})
+
+    rows = [_row("section", "Operating Costs")]
+    grand_by_month = {m: 0.0 for m in _MONTHS}
+    grand_total = 0.0
+    for acc in _accounts_by_root("Expense", company):
+        vals = {}
+        line_total = 0.0
+        for mi, m in enumerate(_MONTHS):
+            fd, td = _month_bounds(year, mi)
+            amt = _gl_account_balance(acc["name"], fd, td, cost_center=cost_center, sign="debit")
+            if amt:
+                vals[m] = amt
+                grand_by_month[m] += amt
+                line_total += amt
+        if line_total:
+            vals["total"] = line_total
+            grand_total += line_total
+            rows.append(_row("item", acc.get("account_name") or acc["name"], vals))
+    total_vals = {k: v for k, v in grand_by_month.items() if v}
+    if grand_total:
+        total_vals["total"] = grand_total
+    rows.append(_row("total", "Total", total_vals))
+    return {"id": "cost_tracking", "title": f"COST TRACKING \u2013 {year} (KShs.)",
+            "columns": columns, "rows": rows}
+
+
+# ---- Loan Schedule ----------------------------------------------------------
+def _loan_schedule(property, year):
+    """
+    Loans sourced from Liability accounts in the GL (no dedicated Loan doctype
+    exists). Each liability account = one loan line; balance = credit-debit.
+    """
+    company = _resolve_company_for_property(property)
+    fd, td = _year_bounds(year)
+    columns = [
+        {"key": "label", "header": "Loans", "kind": "label"},
+        {"key": "loan_bal", "header": f"Loan Bal - {year}", "kind": "money"},
+    ]
+    rows = []
+    total = 0.0
+    for acc in _accounts_by_root("Liability", company):
+        bal = _gl_account_balance(acc["name"], fd, td, sign="credit")
+        if abs(bal) > 0.005:
+            rows.append(_row("item", acc.get("account_name") or acc["name"], {"loan_bal": bal}))
+            total += bal
+    rows.append(_row("total", "TOTAL", {"loan_bal": total}))
+    return {"id": "loan_schedule", "title": f"FINANCING COSTS \u2013 LOAN SCHEDULE ({year}) (KShs.)",
+            "columns": columns, "rows": rows}
+
+
+# ---- Project Pipeline -------------------------------------------------------
+def _project_pipeline(property):
+    """Construction Project records (real). sqf/units/rent-per-unit fields don't exist -> blank."""
+    columns = [
+        {"key": "no", "header": "No.", "kind": "text"},
+        {"key": "label", "header": "Project Name", "kind": "label"},
+        {"key": "status", "header": "Status", "kind": "text"},
+        {"key": "delivery", "header": "Delivery Date", "kind": "text"},
+        {"key": "project_cost", "header": "Project Cost", "kind": "money"},
+        {"key": "actual_spend", "header": "Actual Spend", "kind": "money"},
+    ]
+    filters = {}
+    if property:
+        filters["property"] = property
+    projects = frappe.get_all("Construction Project", filters=filters,
+                              fields=["project_name", "status", "expected_end_date", "total_budget", "total_actual_spend"],
+                              order_by="creation asc")
+    rows = []
+    total_budget = 0.0
+    total_actual = 0.0
+    for i, p in enumerate(projects, start=1):
+        rows.append({
+            "kind": "item", "no": i, "label": p.get("project_name"),
+            "status": p.get("status") or "",
+            "delivery": str(p.get("expected_end_date"))[:10] if p.get("expected_end_date") else "",
+            "values": {
+                "project_cost": flt(p.get("total_budget")),
+                "actual_spend": flt(p.get("total_actual_spend")),
+            },
+        })
+        total_budget += flt(p.get("total_budget"))
+        total_actual += flt(p.get("total_actual_spend"))
+    rows.append(_row("total", "TOTAL", {"project_cost": total_budget, "actual_spend": total_actual}))
+    return {"id": "project_pipeline", "title": "PROJECT PIPELINE", "columns": columns, "rows": rows}
+
+
+@frappe.whitelist()
+def financial_statement(kind=None, property=None, year=None, months=12, from_date=None, to_date=None):
+    """
+    Return a fully-structured financial statement built from real records.
+    kind: income_statement | balance_sheet | cashflow_statement |
+          cost_tracking | loan_schedule | project_pipeline
+    """
+    year = int(year) if year else getdate(nowdate()).year
+    months = int(months) if months else 12
+    months = max(1, min(12, months))
+
+    if kind == "income_statement":
+        return _income_statement(property, year, months)
+    if kind == "balance_sheet":
+        return _balance_sheet(property, year)
+    if kind == "cashflow_statement":
+        return _cashflow_statement(property, year)
+    if kind == "cost_tracking":
+        return _cost_tracking(property, year)
+    if kind == "loan_schedule":
+        return _loan_schedule(property, year)
+    if kind == "project_pipeline":
+        return _project_pipeline(property)
+
+    frappe.throw(f"Unknown statement kind: {kind}")
+
+
+@frappe.whitelist()
+def rent_collection_by_property(months=6):
+    """
+    Monthly rent COLLECTED (GL income) broken down per property, for a grouped
+    bar chart on the admin dashboard.
+
+    Returns:
+      {
+        "months": ["Apr", "May", ...],          # chronological labels
+        "properties": [{"key": "p_<name>", "id": <property>, "name": <property_name>}],
+        "series": [ {"month": "Apr", "p_<name>": 12000, ...}, ... ]  # one row per month
+      }
+    Each property becomes a series keyed by a stable, chart-safe key ("p_<docname>")
+    so the frontend can render one <Bar> per property regardless of naming.
+    """
+    from frappe.utils import get_first_day, get_last_day
+
+    months = max(1, min(12, int(months or 6)))
+    today = getdate(nowdate())
+
+    # Properties that have a cost center can be attributed in the GL. Include all
+    # properties for labels; those without a cost center simply show zero.
+    props = frappe.get_all(
+        "Property",
+        fields=["name", "property_name", "cost_center"],
+        order_by="property_name asc",
+    )
+    prop_meta = []
+    for p in props:
+        prop_meta.append({
+            "key": f"p_{p.name}",
+            "id": p.name,
+            "name": p.property_name or p.name,
+            "cost_center": p.cost_center,
+        })
+
+    month_labels = []
+    series = []
+    for i in range(months - 1, -1, -1):
+        m_ref = add_months(today, -i)
+        m_start = get_first_day(m_ref)
+        m_end = get_last_day(m_ref)
+        label = formatdate(m_ref, "MMM")
+        month_labels.append(label)
+
+        row = {"month": label, "full_month": formatdate(m_ref, "MMM YYYY")}
+        for pm in prop_meta:
+            amount = 0.0
+            if pm["cost_center"]:
+                amount = _gl_income(m_start, m_end, cost_center=pm["cost_center"])
+            row[pm["key"]] = flt(amount)
+        series.append(row)
+
+    return {
+        "months": month_labels,
+        # Strip cost_center from the public payload; the frontend only needs key/id/name.
+        "properties": [{"key": pm["key"], "id": pm["id"], "name": pm["name"]} for pm in prop_meta],
+        "series": series,
+    }

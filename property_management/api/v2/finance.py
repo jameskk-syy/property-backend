@@ -79,8 +79,10 @@ def record_expense(property, vendor_name, amount, description, submit=True):
 @envelope
 def generate_monthly_invoices(period=None, organization=None, property=None):
 	"""
-	Generate the combined monthly invoices (rent + garbage + metered utilities)
-	for every active lease in scope. period = 'YYYY-MM' (defaults to current month).
+	Generate monthly invoices for every active lease in scope. Rent and utilities
+	are billed on SEPARATE invoices: a rent invoice (PM-MONTHLY) and a utility
+	invoice combining garbage + metered water/electricity (PM-UTILITY). period =
+	'YYYY-MM' (defaults to current month).
 	"""
 	from property_management.integration.billing import generate_monthly_invoices as _gen
 	return _gen(period=period, organization=organization, property=property)
@@ -140,7 +142,8 @@ def list_expenses(property=None, organization=None, status=None, mine=None, page
 		data = frappe.get_all(
 			"Property Expense", filters=filters, or_filters=or_filters,
 			fields=["name", "property", "organization", "vendor_name", "expense_category",
-					"amount", "work_description", "status", "approved_at", "creation", "owner"],
+					"amount", "work_description", "status", "approved_at", "creation", "owner",
+					"expense_scope", "unit", "deduct_from_deposit", "deposit_deducted", "deposit_shortfall"],
 			order_by="creation desc",
 			limit_start=offset,
 			limit_page_length=page_size,
@@ -149,7 +152,8 @@ def list_expenses(property=None, organization=None, status=None, mine=None, page
 		data = frappe.get_all(
 			"Property Expense", filters=filters,
 			fields=["name", "property", "organization", "vendor_name", "expense_category",
-					"amount", "work_description", "status", "approved_at", "creation", "owner"],
+					"amount", "work_description", "status", "approved_at", "creation", "owner",
+					"expense_scope", "unit", "deduct_from_deposit", "deposit_deducted", "deposit_shortfall"],
 			order_by="creation desc",
 			limit_start=offset,
 			limit_page_length=page_size,
@@ -173,7 +177,8 @@ def list_expenses(property=None, organization=None, status=None, mine=None, page
 @frappe.whitelist()
 @envelope
 def raise_expense(property, amount, work_description, expense_category=None, vendor=None,
-				  vendor_name=None, vendor_phone=None):
+				  vendor_name=None, vendor_phone=None, unit=None, expense_scope=None,
+				  deduct_from_deposit=None):
 	"""
 	Raise a property expense for approval (Path A). Creates a Property Expense in
 	'Pending Approval' plus a maker-checker Approval Request. Nothing posts to the
@@ -182,14 +187,36 @@ def raise_expense(property, amount, work_description, expense_category=None, ven
 
 	The creator (typically a caretaker) cannot approve their own request.
 	vendor_phone is the payee M-Pesa number (used later for B2C disbursement).
+
+	expense_scope: "Property" (whole property) or "Unit / Tenant". When Unit/Tenant
+	with a unit, the expense is attached to that unit; if deduct_from_deposit is set
+	the repair is taken from the unit tenant's deposit on approval.
 	"""
 	prop = frappe.get_doc("Property", property)
 	organization = prop.organization
+
+	# Normalise scope + validate the unit belongs to the property.
+	scope = expense_scope if expense_scope in ("Property", "Unit / Tenant") else ("Unit / Tenant" if unit else "Property")
+	if scope != "Unit / Tenant":
+		unit = None
+	if unit:
+		if not frappe.db.exists("Property Unit", unit):
+			frappe.throw("Selected unit does not exist.")
+		unit_property = frappe.db.get_value("Property Unit", unit, "property")
+		if unit_property != property:
+			frappe.throw("Selected unit does not belong to the chosen property.")
+
+	deduct = 1 if str(deduct_from_deposit).lower() in ("1", "true", "yes", "on") else 0
+	if not unit:
+		deduct = 0
 
 	exp = frappe.get_doc({
 		"doctype": "Property Expense",
 		"organization": organization,
 		"property": property,
+		"expense_scope": scope,
+		"unit": unit,
+		"deduct_from_deposit": deduct,
 		"expense_category": expense_category,
 		"vendor": vendor,
 		"vendor_name_manual": vendor_name,
@@ -298,10 +325,13 @@ def list_invoices(company=None, property=None, status=None, page=1, page_size=8,
 
 @frappe.whitelist()
 @envelope
-def list_all_invoices(kind=None, status=None, search=None, page=1, page_size=8):
+def list_all_invoices(kind=None, status=None, search=None, page=1, page_size=8, property=None):
 	"""
 	Unified invoice register for admin with pagination: Sales Invoices (money in) + Purchase
 	Invoices (money out), scoped to the caller's organization Company.
+
+	property: optional Property filter. Both Sales and Purchase Invoices carry a
+	`property_ref` custom field, so we filter on that when set.
 	"""
 	from property_management.api.utils import resolve_organization
 
@@ -326,6 +356,8 @@ def list_all_invoices(kind=None, status=None, search=None, page=1, page_size=8):
 		common_filters["company"] = company
 	if status:
 		common_filters["status"] = status
+	if property:
+		common_filters["property_ref"] = property
 
 	if kind in (None, "", "sales"):
 		for si in frappe.get_all(
