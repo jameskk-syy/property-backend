@@ -1624,9 +1624,11 @@ def list_units(property=None, search=None, page=1, page_size=8):
 	List Property Units with pagination for a property (or all). Runs server-side so it is not
 	blocked by the Property Unit doctype's role permissions the way /resource is.
 	"""
-	# Sanitize pagination inputs
+	# Sanitize pagination inputs. Allow a high page size (up to 1000) so callers
+	# that need the full unit set for a property (e.g. the Units tab / exports on
+	# large portfolios) aren't silently truncated at 100.
 	page = max(1, int(page or 1))
-	page_size = min(100, max(1, int(page_size or 8)))
+	page_size = min(1000, max(1, int(page_size or 8)))
 	
 	filters = {}
 	if property:
