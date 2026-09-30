@@ -14,6 +14,10 @@ from frappe.utils import flt
 
 from property_management.api.v2 import envelope
 from property_management.api.utils import resolve_organization
+
+# Fixed password assigned to every account created here (per request). All
+# tenants/caretakers/landlords are provisioned with this same password.
+DEFAULT_USER_PASSWORD = "Password@123"
 def _file_to_base64(file_url):
     """Convert a Frappe file URL to base64 data URL for frontend display."""
     if not file_url:
@@ -230,9 +234,13 @@ def _ensure_user_with_role(email, full_name, role, phone=None, organization=None
 
 	is_new = not frappe.db.exists("User", user_id)
 	if is_new:
-		# Generate random password for new users
-		password = _generate_random_password()
-		
+		# Fixed shared password for all created accounts (per request).
+		#
+		# NOTE: Passing `new_password` on insert routes through Frappe's password
+		# update, which is RATE-LIMITED — bulk imports of many users in one request
+		# raise "Throttled". To avoid that we create the user WITHOUT new_password,
+		# then set the password directly via update_password (Authentication table),
+		# which does not trip the per-request insert throttle.
 		user = frappe.get_doc({
 			"doctype": "User",
 			"email": user_id,
@@ -242,24 +250,13 @@ def _ensure_user_with_role(email, full_name, role, phone=None, organization=None
 			"phone": phone or None,
 			"send_welcome_email": 0,
 			"user_type": "System User",
-			"new_password": password,
 		})
 		user.flags.ignore_permissions = True
+		user.flags.ignore_password_policy = True
 		user.insert(ignore_permissions=True)
-		
-		# Send credentials notification via enabled messaging channels
-		frappe.enqueue(
-			_send_credentials_notification,
-			user_id=user_id,
-			password=password,
-			full_name=full_name,
-			phone=phone,
-			email=email if email and not email.endswith("@nest.local") else None,
-			role=role_name,
-			organization=organization,
-			queue="short",
-			now=frappe.flags.in_test,
-		)
+
+		from frappe.utils.password import update_password as _set_pwd
+		_set_pwd(user.name, DEFAULT_USER_PASSWORD)
 	else:
 		user = frappe.get_doc("User", user_id)
 		if phone and not user.mobile_no:
@@ -2160,10 +2157,12 @@ def _post_migration_payment(lease, rent_amount, deposit_amount, property_name, c
 	je.insert(ignore_permissions=True)
 	je.submit()
 	
-	# Update lease with journal entry reference
+	# Record the posting reference on the lease. Lease Agreement has
+	# `initial_payment_reference` (not a `journal_entry` field), so store the
+	# Journal Entry name there.
 	frappe.db.set_value("Lease Agreement", lease.name, {
 		"initial_payment_status": "Paid",
-		"journal_entry": je.name,
+		"initial_payment_reference": je.name,
 	})
 
 
