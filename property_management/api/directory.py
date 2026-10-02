@@ -200,6 +200,41 @@ def _phone_digits(phone):
 	return "".join(ch for ch in str(phone or "") if ch.isdigit())
 
 
+def _find_existing_user_by_phone(phone):
+	"""
+	Find an existing User whose stored phone matches `phone`, comparing on the
+	normalized Kenyan form (last 9 digits) so that different formats of the SAME
+	number resolve to the same account -- e.g. a user stored as 0748839005 /
+	0748839005@nest.local is matched when the import sends +254748839005.
+
+	This mirrors validation.validate_unique_phone's _normalize_phone so the
+	importer reuses the existing account instead of trying to create a duplicate
+	(which that validator would -- correctly -- reject). Returns the User name or
+	None.
+	"""
+	digits = _phone_digits(phone)
+	if not digits:
+		return None
+	# Normalize to the local 9-digit subscriber part, matching the validator.
+	if digits.startswith("254") and len(digits) >= 12:
+		digits = digits[3:]
+	elif digits.startswith("0") and len(digits) == 10:
+		digits = digits[1:]
+	if len(digits) < 8:
+		return None
+	pattern = f"%{digits[-9:]}%"
+	rows = frappe.db.sql(
+		"""
+		SELECT name FROM `tabUser`
+		WHERE mobile_no LIKE %(p)s OR phone LIKE %(p)s OR name LIKE %(p)s
+		LIMIT 1
+		""",
+		{"p": pattern},
+		as_dict=True,
+	)
+	return rows[0].name if rows else None
+
+
 def _ensure_user_with_role(email, full_name, role, phone=None, organization=None):
 	"""
 	Create (or reuse) a Frappe User for a person, keyed by email when available
@@ -221,8 +256,16 @@ def _ensure_user_with_role(email, full_name, role, phone=None, organization=None
 	if email:
 		user_id = email
 	elif digits:
-		# Synthetic address so the account exists and is findable by phone.
-		user_id = f"{digits}@nest.local"
+		# Reuse an existing account for the SAME phone number even if it was stored
+		# in a different format (e.g. 0748839005@nest.local when the import sends
+		# +254748839005). Without this, we would mint a new synthetic id and the
+		# unique-phone validator would reject the insert, failing the whole row.
+		existing = _find_existing_user_by_phone(phone)
+		if existing:
+			user_id = existing
+		else:
+			# Synthetic address so the account exists and is findable by phone.
+			user_id = f"{digits}@nest.local"
 	else:
 		return None
 
@@ -253,7 +296,20 @@ def _ensure_user_with_role(email, full_name, role, phone=None, organization=None
 		})
 		user.flags.ignore_permissions = True
 		user.flags.ignore_password_policy = True
-		user.insert(ignore_permissions=True)
+		# Bulk/migration imports legitimately insert many Users in one request.
+		# Frappe's throttle_user_creation() throws "Throttled" once more than
+		# `throttle_user_limit` (default 60) Users are created within a rolling 60s
+		# window -- across the whole site, not just this request, so repeated import
+		# runs accumulate and trip it. The framework skips that check entirely when
+		# frappe.flags.in_import is set (that's what the built-in Data Import tool
+		# does). We opt into the same behavior just around the insert and restore the
+		# previous value afterwards so the flag never leaks into the rest of the request.
+		_prev_in_import = frappe.flags.in_import
+		frappe.flags.in_import = True
+		try:
+			user.insert(ignore_permissions=True)
+		finally:
+			frappe.flags.in_import = _prev_in_import
 
 		from frappe.utils.password import update_password as _set_pwd
 		_set_pwd(user.name, DEFAULT_USER_PASSWORD)
@@ -764,12 +820,15 @@ def bulk_create_caretakers(caretakers, organization=None):
 # UI property types -> DocType Select options (Residential/Commercial/Mixed Use)
 _PROPERTY_TYPE_MAP = {
 	"apartment": "Residential",
+	"villa": "Residential",
 	"villa / maisonette": "Residential",
+	"bedsitters": "Residential",
 	"bedsitter block": "Residential",
+	"singles": "Residential",
 	"commercial complex": "Commercial",
+	"commercial": "Commercial",
 	"mixed use": "Mixed Use",
 	"residential": "Residential",
-	"commercial": "Commercial",
 }
 
 
@@ -1589,18 +1648,22 @@ def _upsert_unit(row, property_name, organization):
 
 # Valid options on the Property Unit.unit_type Select.
 _VALID_UNIT_TYPES = {
-	"Bedsitter", "Studio", "1 Bedroom", "2 Bedroom", "3 Bedroom",
-	"4 Bedroom", "Penthouse", "Commercial Shop", "Office Space",
+	"Bedsitter", "Studio", "Singles", "1 Bedroom", "2 Bedroom", "3 Bedroom",
+	"4 Bedroom", "Penthouse", "Shops", "Commercial Shop", "Office Space",
 }
 _UNIT_TYPE_ALIASES = {
 	"bedsitter": "Bedsitter",
 	"bed sitter": "Bedsitter",
 	"studio": "Studio",
+	"singles": "Singles",
+	"single": "Singles",
 	"1 bedroom": "1 Bedroom",
 	"2 bedroom": "2 Bedroom",
 	"3 bedroom": "3 Bedroom",
 	"4 bedroom": "4 Bedroom",
 	"penthouse": "Penthouse",
+	"shops": "Shops",
+	"shop": "Shops",
 	"commercial shop": "Commercial Shop",
 	"office space": "Office Space",
 }
