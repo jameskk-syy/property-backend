@@ -68,7 +68,7 @@
    "fieldname": "unit_type",
    "fieldtype": "Select",
    "label": "Unit Type",
-   "options": "Bedsitter\nStudio\n1 Bedroom\n2 Bedroom\n3 Bedroom\n4 Bedroom\nPenthouse\nCommercial Shop\nOffice Space",
+   "options": "Bedsitter\nStudio\nSingles\n1 Bedroom\n2 Bedroom\n3 Bedroom\n4 Bedroom\nPenthouse\nShops\nCommercial Shop\nOffice Space",
    "reqd": 1
   },
   {
