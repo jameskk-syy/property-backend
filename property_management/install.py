@@ -263,6 +263,8 @@ def setup_roles():
     print("Setting up Roles...")
     
     roles = {
+        # Cross-dashboard super user (admin + caretaker + landlord + tenant).
+        "Super Admin": {"desk_access": 1},
         "Organization Admin": {"desk_access": 1},
         "Director": {"desk_access": 1},
         "Office User": {"desk_access": 1},
@@ -414,6 +416,83 @@ def setup_administrator():
     print("✓ Administrator configured")
 
 
+# Initial Super Admin seeded on setup. Login is by phone (OTP) or password; the
+# user identity follows the app's phone convention: <254-digits>@nest.local.
+SUPER_ADMIN_PHONE = "0105155612"
+SUPER_ADMIN_PASSWORD = "SuperAdmin@2026"
+
+
+def _normalize_ke_phone(phone):
+    """Mirror auth._normalize_phone: digits only, Kenyan country code."""
+    digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
+    if digits.startswith("0") and len(digits) == 10:
+        digits = "254" + digits[1:]
+    elif digits.startswith("7") and len(digits) == 9:
+        digits = "254" + digits
+    elif digits.startswith("1") and len(digits) == 9:
+        digits = "254" + digits
+    return digits
+
+
+def setup_super_admin():
+    """
+    Seed the initial Super Admin user (idempotent).
+
+    Identity follows the phone convention used by OTP/phone login:
+    <254...>@nest.local with mobile_no set, so the user can sign in by phone.
+    Roles: Super Admin (cross-dashboard app role) + System Manager (desk/API).
+    """
+    print("Setting up Super Admin...")
+
+    digits = _normalize_ke_phone(SUPER_ADMIN_PHONE)
+    if not digits:
+        print("  ⚠ Invalid Super Admin phone; skipping")
+        return
+
+    email = f"{digits}@nest.local"
+
+    if frappe.db.exists("User", email):
+        user = frappe.get_doc("User", email)
+        print(f"  - Super Admin user '{email}' already exists")
+    else:
+        user = frappe.get_doc({
+            "doctype": "User",
+            "email": email,
+            "first_name": "Super",
+            "last_name": "Admin",
+            "mobile_no": digits,
+            "phone": digits,
+            "send_welcome_email": 0,
+            "user_type": "System User",
+        })
+        user.flags.ignore_permissions = True
+        user.insert(ignore_permissions=True)
+        print(f"  ✓ Super Admin user '{email}' created (phone {SUPER_ADMIN_PHONE})")
+
+    # Grant the roles (idempotent).
+    for role in ("Super Admin", "System Manager"):
+        if frappe.db.exists("Role", role):
+            user.add_roles(role)
+
+    # Set a known initial password.
+    try:
+        from frappe.utils.password import update_password
+        update_password(email, SUPER_ADMIN_PASSWORD)
+    except Exception:
+        frappe.log_error(title="super admin password set", message=frappe.get_traceback())
+
+    # Generate API keys so token login works immediately.
+    try:
+        if not frappe.db.get_value("User", email, "api_key"):
+            from frappe.core.doctype.user.user import generate_keys
+            generate_keys(email)
+    except Exception:
+        frappe.log_error(title="super admin api keys", message=frappe.get_traceback())
+
+    frappe.db.commit()
+    print(f"✓ Super Admin configured (login phone {SUPER_ADMIN_PHONE})")
+
+
 # ============================================================================
 # HRMS INSTALLATION
 # ============================================================================
@@ -510,6 +589,9 @@ def setup_site():
     
     # 12. Administrator
     setup_administrator()
+
+    # 13. Super Admin (cross-dashboard user, phone login)
+    setup_super_admin()
     
     # Final commit
     frappe.db.commit()
