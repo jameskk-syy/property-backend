@@ -18,6 +18,21 @@ import hashlib
 from functools import wraps
 
 
+# Frappe role that marks a user as a cross-dashboard Super Admin. A Super Admin
+# resolves to the app role 'superadmin', which the frontend allows into ALL four
+# dashboards (admin, caretaker, landlord, tenant) with full module access.
+SUPER_ADMIN_ROLE = 'Super Admin'
+
+
+def _has_super_admin(user_id, roles=None):
+    """True if the user holds the Super Admin Frappe role."""
+    if not user_id or user_id == 'Guest':
+        return False
+    if roles is not None:
+        return SUPER_ADMIN_ROLE in roles
+    return bool(frappe.db.exists('Has Role', {'parent': user_id, 'role': SUPER_ADMIN_ROLE}))
+
+
 def _get_user_info(user_id):
     """Get user details for token response."""
     # Check if it's Administrator
@@ -35,7 +50,10 @@ def _get_user_info(user_id):
         
         # Determine role from user roles
         roles = [r.role for r in user.roles]
-        if 'Administrator' in roles or 'System Manager' in roles:
+        # Super Admin wins over everything: full cross-dashboard access.
+        if _has_super_admin(user_id, roles):
+            role = 'superadmin'
+        elif 'Administrator' in roles or 'System Manager' in roles:
             role = 'admin'
         elif 'Director' in roles:
             role = 'admin'
@@ -129,8 +147,10 @@ def login(email, password):
         # Determine role
         role = 'admin' if user_id == 'Administrator' else 'caretaker'
         if user_id != 'Administrator':
-            has_admin = frappe.db.exists('Has Role', {'parent': user_id, 'role': ['in', ['Administrator', 'System Manager', 'Director']]})
-            if has_admin:
+            # Super Admin wins over everything: full cross-dashboard access.
+            if _has_super_admin(user_id):
+                role = 'superadmin'
+            elif frappe.db.exists('Has Role', {'parent': user_id, 'role': ['in', ['Administrator', 'System Manager', 'Director']]}):
                 role = 'admin'
             else:
                 if frappe.db.exists('Caretaker', {'user': user_id}):
@@ -723,6 +743,9 @@ def verify_otp(phone, otp):
         })
         if has_admin:
             role = 'admin'
+        # Super Admin wins over everything: full cross-dashboard access.
+        if _has_super_admin(user_id):
+            role = 'superadmin'
         
         # Get or generate API keys
         api_key = user_data.get('api_key')
@@ -867,7 +890,9 @@ def get_current_user_profile():
     
     # Determine role
     role = 'user'
-    if user_id == 'Administrator':
+    if _has_super_admin(user_id):
+        role = 'superadmin'  # Super Admin wins: full cross-dashboard access.
+    elif user_id == 'Administrator':
         role = 'admin'
     elif frappe.db.exists('Has Role', {'parent': user_id, 'role': ['in', ['Administrator', 'System Manager', 'Director']]}):
         role = 'admin'

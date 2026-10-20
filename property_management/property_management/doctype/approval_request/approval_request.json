@@ -31,7 +31,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Request Type",
-   "options": "Expense\nPayroll\nConstruction Purchase\nJournal Entry",
+   "options": "Expense\nPayroll\nConstruction Purchase\nJournal Entry\nRent Change\nOnboarding Discount",
    "reqd": 1
   },
   {

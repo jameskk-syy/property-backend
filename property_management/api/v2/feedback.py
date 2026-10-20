@@ -149,10 +149,10 @@ def raise_feedback(feedback, property=None, unit=None, tenant=None, category="Ge
 		frappe.throw("Please provide your feedback.")
 	
 	# Find caretaker linked to this user
-	caretaker = frappe.db.get_value("Property Caretaker", {"user": user}, "name")
+	caretaker = frappe.db.get_value("Caretaker", {"user": user}, "name")
 	caretaker_name = ""
 	if caretaker:
-		caretaker_name = frappe.db.get_value("Property Caretaker", caretaker, "caretaker_name") or ""
+		caretaker_name = frappe.db.get_value("Caretaker", caretaker, "caretaker_name") or ""
 	
 	# Get tenant info if provided
 	tenant_name = ""
@@ -195,7 +195,7 @@ def my_feedback():
 	user = frappe.session.user
 	
 	# Find caretaker linked to this user
-	caretaker = frappe.db.get_value("Property Caretaker", {"user": user}, "name")
+	caretaker = frappe.db.get_value("Caretaker", {"user": user}, "name")
 	
 	if not caretaker:
 		return []
@@ -275,7 +275,7 @@ def caretaker_options(property=None):
 		if not names:
 			return []
 		filters["name"] = ["in", list(set(n for n in names if n))]
-	rows = frappe.get_all("Property Caretaker", filters=filters,
+	rows = frappe.get_all("Caretaker", filters=filters,
 						  fields=["name", "caretaker_name"], order_by="caretaker_name asc")
 	return [{"id": r.name, "name": r.caretaker_name or r.name} for r in rows]
 

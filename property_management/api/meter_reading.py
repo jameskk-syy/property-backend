@@ -51,6 +51,44 @@ def capture_meter_reading(unit_id, utility_type, current_reading, rate_per_unit=
 
 
 @frappe.whitelist()
+def get_last_reading(unit_id, utility_type):
+	"""
+	Return the most recent reading for a unit + utility type so the caretaker form
+	can auto-populate the "previous reading" field the moment a unit is selected.
+
+	This mirrors the auto-detect logic in MeterReading.validate(): the previous
+	reading for the next capture is the last recorded `current_reading` for the
+	same unit + utility. Returns 0 when there is no prior reading (e.g. a new
+	unit / new tenant), in which case the caretaker enters the opening value.
+	"""
+	if not unit_id or not utility_type:
+		frappe.throw(_("Unit and utility type are required."))
+
+	row = frappe.db.get_value(
+		"Meter Reading",
+		{"unit": unit_id, "utility_type": utility_type},
+		["current_reading", "rate_per_unit", "reading_date"],
+		order_by="reading_date desc, creation desc",
+		as_dict=True,
+	)
+
+	if not row:
+		return {
+			"has_previous": False,
+			"previous_reading": 0.0,
+			"rate_per_unit": None,
+			"last_reading_date": None,
+		}
+
+	return {
+		"has_previous": True,
+		"previous_reading": float(row.current_reading or 0.0),
+		"rate_per_unit": float(row.rate_per_unit) if row.rate_per_unit is not None else None,
+		"last_reading_date": str(row.reading_date) if row.reading_date else None,
+	}
+
+
+@frappe.whitelist()
 def list_meter_readings(property=None, unit=None, captured_by=None, limit=100):
 	"""
 	List meter readings (server-side, so caretakers aren't blocked by the

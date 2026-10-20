@@ -69,7 +69,33 @@ class LeaseAgreement(Document):
 				unit_doc.status = "Occupied"
 			elif self.status in ["Terminated", "Expired"]:
 				unit_doc.status = "Vacant"
+			# "Pending Approval" intentionally does NOT occupy the unit — a
+			# discounted onboarding leaves the unit available until approved.
 			unit_doc.save(ignore_permissions=True)
+
+	def approve(self, user=None, comment=None):
+		"""
+		Approve a discounted onboarding: activate the lease (which occupies the
+		unit via on_update). Maker-checker: the caretaker who created it cannot
+		approve their own discount.
+		"""
+		from frappe.utils import now_datetime
+		if not user:
+			user = frappe.session.user
+		if user != "Administrator" and user == self.owner:
+			frappe.throw("Maker-Checker Rule Violation: Creator cannot approve their own onboarding discount.")
+		self.status = "Active"
+		self.save(ignore_permissions=True)
+
+	def reject(self, user=None, comment=None):
+		"""
+		Reject a discounted onboarding. The lease stays Pending Approval (unit not
+		occupied, nothing posted) so the caretaker can revise the rent and resubmit,
+		or terminate it. We record the rejection on the Approval Request itself.
+		"""
+		# No lease state change: leaving it Pending keeps the unit free and the
+		# books untouched. Deliberate no-op on the lease.
+		return
 
 	def generate_agreement_pdf(self):
 		"""

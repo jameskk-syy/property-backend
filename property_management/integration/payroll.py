@@ -29,6 +29,20 @@ def _as_system_user():
 		frappe.set_user(original)
 
 
+def _property_cost_center(property_name: str) -> str | None:
+	"""Resolve a property's cost center (provisioning it if missing). Returns None
+	when no property is given, so payroll falls back to the company default."""
+	if not property_name:
+		return None
+	cc = frappe.db.get_value("Property", property_name, "cost_center")
+	if cc:
+		return cc
+	try:
+		return setup.provision_property_cost_center(property_name)
+	except Exception:
+		return None
+
+
 def _category_for(emp) -> str:
 	"""Infer a salary-structure category from the employee's designation."""
 	desig = (getattr(emp, "designation", "") or "").lower()
@@ -144,6 +158,11 @@ def create_employee(
 		"designation": designation,
 		"organization_ref": organization,
 		"property_ref": property_name,
+		# HRMS books each Salary Slip's accrual against the employee's
+		# payroll_cost_center. Point it at the property's cost center so salary
+		# expense lands under that property (and shows in the per-property
+		# expense report). Falls back to the company default when no property.
+		"payroll_cost_center": _property_cost_center(property_name),
 		"gross_salary": flt(gross_salary),
 		"mpesa_phone": mpesa_phone or "",
 	})
@@ -233,10 +252,20 @@ def run_payroll(company: str = None, organization: str = None, period: str = Non
 
 		employees = frappe.get_all(
 			"Employee", filters=emp_filters,
-			fields=["name", "employee_name", "gross_salary", "designation", "property_ref as property"],
+			fields=["name", "employee_name", "gross_salary", "designation",
+					"property_ref as property", "payroll_cost_center"],
 		)
 		if not employees:
 			return {"status": "No active employees", "company": company, "slips": 0}
+
+		# Backfill payroll_cost_center from the employee's property so salary accrual
+		# posts to the property cost center. Keeps older employees (created before
+		# this mapping) attributed correctly without a manual migration.
+		for emp in employees:
+			desired_cc = _property_cost_center(emp.get("property"))
+			if desired_cc and emp.get("payroll_cost_center") != desired_cc:
+				frappe.db.set_value("Employee", emp.name, "payroll_cost_center", desired_cc, update_modified=False)
+		frappe.db.commit()
 
 		# Idempotency: if this company already has Salary Slips for the period, return
 		# that existing run instead of erroring with a duplicate-entry exception.

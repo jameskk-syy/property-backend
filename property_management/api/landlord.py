@@ -447,3 +447,60 @@ def download_lease(lease):
 	frappe.local.response.filename = f"Lease-{lease}.pdf"
 	frappe.local.response.filecontent = content
 	frappe.local.response.type = "pdf"
+
+
+# --------------------------------------------------------------------------
+# Feedback (read-only): tenant/caretaker feedback on the landlord's properties
+# --------------------------------------------------------------------------
+
+@frappe.whitelist()
+def my_feedback(property=None, status=None):
+	"""
+	Feedback raised on the landlord's properties (by tenants or caretakers), so a
+	landlord can see issues affecting their portfolio. Read-only — landlords don't
+	respond here (that's the caretaker/admin's role).
+	"""
+	landlord = _current_landlord()
+	prop_names = _scope_properties(landlord, property)
+	if not prop_names:
+		return []
+
+	filters = {"property": ["in", prop_names]}
+	if status:
+		filters["status"] = status
+
+	rows = frappe.get_all(
+		"Tenant Complaint",
+		filters=filters,
+		fields=["name", "raised_by_type", "tenant", "tenant_name", "mobile_number",
+				"caretaker", "caretaker_name", "property", "unit", "category",
+				"priority", "status", "feedback", "admin_response",
+				"responded_by", "responded_at", "creation"],
+		order_by="creation desc",
+	)
+
+	out = []
+	for r in rows:
+		prop_name = frappe.db.get_value("Property", r.property, "property_name") if r.property else ""
+		unit_no = frappe.db.get_value("Property Unit", r.unit, "unit_number") if r.unit else ""
+		out.append({
+			"id": r.name,
+			"raisedBy": r.raised_by_type or "Tenant",
+			"tenant": r.tenant,
+			"tenantName": r.tenant_name or r.tenant or "",
+			"mobileNumber": r.mobile_number or "",
+			"caretaker": r.caretaker,
+			"caretakerName": r.caretaker_name or "",
+			"property": r.property,
+			"propertyName": prop_name or r.property or "",
+			"unit": unit_no or r.unit or "",
+			"category": r.category or "General",
+			"priority": r.priority or "Medium",
+			"status": r.status or "Open",
+			"feedback": r.feedback or "",
+			"response": r.admin_response or "",
+			"respondedBy": r.responded_by or None,
+			"respondedAt": str(r.responded_at)[:19] if r.responded_at else None,
+			"date": str(r.creation)[:10] if r.creation else "",
+		})
+	return out

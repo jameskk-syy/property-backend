@@ -89,7 +89,7 @@
    "fieldname": "caretaker",
    "fieldtype": "Link",
    "label": "Caretaker",
-   "options": "Property Caretaker"
+   "options": "Caretaker"
   },
   {
    "fieldname": "caretaker_name",

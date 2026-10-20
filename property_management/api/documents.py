@@ -60,25 +60,62 @@ def _lease_pdf_url(lease_name, agreement_pdf):
 
 
 @frappe.whitelist()
-def list_tenant_documents(tenant=None, property=None, limit=200):
+def list_tenant_documents(tenant=None, property=None, limit=None, page=None, page_size=None, search=None):
     """
     One row per lease with tenant details and document availability:
     tenant, national ID (number + front/back ID images as base64), property/unit,
     signed date, lease status, and the signed lease PDF URL. Filterable by tenant
     and/or property for the admin document repository.
+
+    Server-side paginated. When `page`/`page_size` are given (the new path), returns
+    {data, pagination:{page,page_size,total,total_pages,has_next,has_prev}}. For
+    back-compat, if neither page nor page_size is given it returns a bare list
+    capped at `limit` (default 200) as before.
     """
+    paginated = page is not None or page_size is not None
+    page = max(1, int(page or 1))
+    page_size = min(100, max(1, int(page_size or 8)))
+
     filters = {}
     if tenant:
         filters["tenant"] = tenant
     if property:
         filters["property"] = property
-    leases = frappe.get_all(
-        "Lease Agreement", filters=filters,
-        fields=["name", "tenant", "property", "unit", "status", "agreement_pdf",
-                "signed_on", "tenant_signature", "caretaker_signature",
-                "start_date", "end_date", "creation"],
-        order_by="creation desc", limit=int(limit),
-    )
+
+    # Optional search across tenant name / national id by resolving matching
+    # tenants first, then constraining leases to them.
+    if search:
+        term = f"%{search}%"
+        matched = frappe.get_all(
+            "Property Tenant",
+            or_filters=[
+                ["tenant_name", "like", term],
+                ["phone", "like", term],
+                ["national_id", "like", term],
+            ],
+            pluck="name",
+        )
+        filters["tenant"] = ["in", matched or ["__none__"]]
+
+    if paginated:
+        total = frappe.db.count("Lease Agreement", filters)
+        offset = (page - 1) * page_size
+        leases = frappe.get_all(
+            "Lease Agreement", filters=filters,
+            fields=["name", "tenant", "property", "unit", "status", "agreement_pdf",
+                    "signed_on", "tenant_signature", "caretaker_signature",
+                    "start_date", "end_date", "creation"],
+            order_by="creation desc", limit_start=offset, limit_page_length=page_size,
+        )
+    else:
+        # Legacy bare-list path, capped at `limit`.
+        leases = frappe.get_all(
+            "Lease Agreement", filters=filters,
+            fields=["name", "tenant", "property", "unit", "status", "agreement_pdf",
+                    "signed_on", "tenant_signature", "caretaker_signature",
+                    "start_date", "end_date", "creation"],
+            order_by="creation desc", limit=int(limit or 200),
+        )
 
     # Prefetch tenant details (including the ID image file URLs).
     tenant_ids = list({le.tenant for le in leases if le.tenant})
@@ -155,6 +192,20 @@ def list_tenant_documents(tenant=None, property=None, limit=200):
             "lease_pdf_url": pdf_url,
             "extra_files": extra_by_lease.get(le.name, []),
         })
+
+    if paginated:
+        total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+        return {
+            "data": rows,
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": total_pages,
+                "has_next": page < total_pages,
+                "has_prev": page > 1,
+            },
+        }
     return rows
 
 

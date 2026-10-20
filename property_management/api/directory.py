@@ -684,6 +684,60 @@ def list_caretakers(page=1, page_size=8, search=None):
 
 @frappe.whitelist()
 @envelope
+def caretaker_properties(caretaker):
+	"""Return the properties currently assigned to a caretaker: [{id, name}]."""
+	if not caretaker:
+		return []
+	rows = frappe.get_all(
+		"Property", filters={"caretaker": caretaker},
+		fields=["name", "property_name"], order_by="property_name asc",
+	)
+	return [{"id": r.name, "name": r.property_name or r.name} for r in rows]
+
+
+@frappe.whitelist()
+@envelope
+def set_caretaker_properties(caretaker, property_ids=None):
+	"""
+	Set the EXACT set of properties a caretaker oversees. Assigns the caretaker to
+	every property in `property_ids` and unassigns them from any property they
+	currently hold that is not in the list. One-shot replace used by the admin /
+	Super Admin caretaker management screen.
+
+	property_ids: JSON list (or comma string) of Property names.
+	"""
+	if not caretaker or not frappe.db.exists("Caretaker", caretaker):
+		frappe.throw("Caretaker not found.")
+
+	if isinstance(property_ids, str):
+		try:
+			property_ids = frappe.parse_json(property_ids)
+		except Exception:
+			property_ids = [p.strip() for p in property_ids.split(",") if p.strip()]
+	desired = set(property_ids or [])
+
+	current = set(frappe.get_all("Property", filters={"caretaker": caretaker}, pluck="name"))
+
+	to_assign = desired - current
+	to_unassign = current - desired
+
+	for prop in to_assign:
+		if frappe.db.exists("Property", prop):
+			frappe.db.set_value("Property", prop, "caretaker", caretaker, update_modified=False)
+	for prop in to_unassign:
+		frappe.db.set_value("Property", prop, "caretaker", None, update_modified=False)
+
+	frappe.db.commit()
+	return {
+		"caretaker": caretaker,
+		"assigned": sorted(desired),
+		"newly_assigned": sorted(to_assign),
+		"unassigned": sorted(to_unassign),
+	}
+
+
+@frappe.whitelist()
+@envelope
 def create_landlord(landlord_name=None, phone=None, email=None, organization=None, **kwargs):
 	"""Create a single landlord. Organization is auto-resolved if not given."""
 	org = resolve_organization(explicit=organization)
@@ -1153,21 +1207,22 @@ def list_tenants(page=1, page_size=8, search=None, limit=None, property=None):
 	
 	tenant_names = [t.name for t in rows]
 	
-	# Active lease per tenant -> unit + monthly rent
-	lease_by_tenant = {}
+	# Active leases per tenant -> ALL units + total monthly rent. A tenant may hold
+	# more than one unit, so we aggregate every active lease (not just the first)
+	# so the list shows every unit and the combined rent.
+	leases_by_tenant = {}
 	unit_label = {}
 	if tenant_names:
 		leases = frappe.get_all(
 			'Lease Agreement',
 			filters={'tenant': ['in', tenant_names], 'status': 'Active'},
-			fields=['tenant', 'unit', 'rent_amount', 'creation'],
-			order_by='creation desc',
+			fields=['name', 'tenant', 'unit', 'rent_amount', 'creation'],
+			order_by='creation asc',
 		)
 		for le in leases:
-			if le.tenant not in lease_by_tenant:
-				lease_by_tenant[le.tenant] = le
-		
-		unit_ids = list({le.unit for le in lease_by_tenant.values() if le.unit})
+			leases_by_tenant.setdefault(le.tenant, []).append(le)
+
+		unit_ids = list({le.unit for le in leases if le.unit})
 		if unit_ids:
 			for u in frappe.get_all(
 				'Property Unit', filters={'name': ['in', unit_ids]},
@@ -1191,7 +1246,21 @@ def list_tenants(page=1, page_size=8, search=None, limit=None, property=None):
 	# Build output
 	data = []
 	for t in rows:
-		le = lease_by_tenant.get(t.name)
+		tenant_leases = leases_by_tenant.get(t.name, [])
+		# Every unit this tenant leases, as labels, plus combined rent.
+		unit_labels = [unit_label.get(le.unit, le.unit) for le in tenant_leases if le.unit]
+		total_rent = sum(flt(le.rent_amount) for le in tenant_leases)
+		# Per-house breakdown so the UI can expand a multi-unit tenant into one row
+		# per house showing that house's own rent.
+		units_detail = [
+			{
+				'lease': le.name,
+				'unit': unit_label.get(le.unit, le.unit),
+				'unit_id': le.unit,
+				'rent': flt(le.rent_amount),
+			}
+			for le in tenant_leases if le.unit
+		]
 		balance = balance_by_customer.get(tenant_display.get(t.name), 0.0)
 		base_status = t.status or 'Active'
 		data.append({
@@ -1200,16 +1269,56 @@ def list_tenants(page=1, page_size=8, search=None, limit=None, property=None):
 			'phone': t.phone or '',
 			'email': t.email or '',
 			'national_id': t.national_id or '',
-			'unit': (unit_label.get(le.unit, le.unit) if le else '') or '',
-			'rent': flt(le.rent_amount) if le else 0.0,
+			# Joined labels so a tenant with two units reads e.g. "SHOP 1, ROOM 5".
+			'unit': ', '.join(unit_labels),
+			'units_count': len(unit_labels),
+			'units_detail': units_detail,
+			'rent': total_rent,
 			'balance': balance,
 			'status': 'Overdue' if balance > 0 else base_status,
 		})
 	
 	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
-	
+
+	# Accumulated totals across the WHOLE filtered set (not just this page), so the
+	# summary cards show the full monthly rent roll and total outstanding balance
+	# regardless of pagination. Computed independently of the paginated slice.
+	if or_filters:
+		all_tenant_names = frappe.get_all('Property Tenant', filters=filters, or_filters=or_filters, pluck='name')
+	else:
+		all_tenant_names = frappe.get_all('Property Tenant', filters=filters, pluck='name')
+
+	total_rent_roll = 0.0
+	total_outstanding = 0.0
+	if all_tenant_names:
+		# Full monthly rent roll = sum of every active lease's rent for these tenants.
+		rent_rows = frappe.get_all(
+			'Lease Agreement',
+			filters={'tenant': ['in', all_tenant_names], 'status': 'Active'},
+			fields=['sum(rent_amount) as amt'],
+		)
+		total_rent_roll = flt(rent_rows[0].amt) if rent_rows and rent_rows[0].amt else 0.0
+
+		# Total outstanding = sum of outstanding Sales Invoices for these tenants'
+		# customers (customer_name == tenant_name).
+		all_customers = frappe.get_all(
+			'Property Tenant', filters={'name': ['in', all_tenant_names]}, pluck='tenant_name',
+		)
+		all_customers = list({c for c in all_customers if c})
+		if all_customers:
+			bal_rows = frappe.get_all(
+				'Sales Invoice',
+				filters={'docstatus': 1, 'customer': ['in', all_customers], 'outstanding_amount': ['>', 0]},
+				fields=['sum(outstanding_amount) as bal'],
+			)
+			total_outstanding = flt(bal_rows[0].bal) if bal_rows and bal_rows[0].bal else 0.0
+
 	return {
 		'data': data,
+		'totals': {
+			'monthly_rent_roll': total_rent_roll,
+			'outstanding_balance': total_outstanding,
+		},
 		'pagination': {
 			'page': page,
 			'page_size': page_size,
@@ -1327,6 +1436,34 @@ def onboard_tenant(tenant_name=None, phone=None, email=None, national_id=None,
 	if not end or frappe.utils.getdate(end) <= frappe.utils.getdate(start):
 		end = frappe.utils.add_months(start, 12)
 
+	# Detect a DISCOUNT. The caretaker form may send an EXPLICIT discount (checkbox
+	# + amount) alongside the already-netted rent, or a discount is inferred when
+	# the agreed rent is below the unit's standard (base) rent. Either way, a
+	# discounted lease is created "Pending Approval" — it does NOT occupy the unit
+	# and no onboarding payment/accounting runs until an admin/Super Admin approves.
+	base_rent = flt(frappe.db.get_value("Property Unit", unit_name, "base_rent"))
+	agreed_rent = flt(_num(rent))  # already net of any discount from the UI
+
+	explicit_apply = str(kwargs.get("apply_discount") or "").lower() in ("1", "true", "yes", "on")
+	explicit_discount = flt(kwargs.get("discount_amount") or 0)
+
+	if explicit_apply and explicit_discount > 0:
+		# Explicit discount from the form: standard rent = net rent + discount.
+		discount_amount = explicit_discount
+		standard_rent = base_rent if base_rent > 0 else (agreed_rent + explicit_discount)
+		is_discounted = True
+	elif base_rent > 0 and agreed_rent < base_rent:
+		# Inferred discount: agreed rent is below the unit's base rent.
+		standard_rent = base_rent
+		discount_amount = base_rent - agreed_rent
+		is_discounted = True
+	else:
+		standard_rent = base_rent
+		discount_amount = 0.0
+		is_discounted = False
+
+	lease_status = "Pending Approval" if is_discounted else "Active"
+
 	lease_name = None
 	try:
 		lease = frappe.get_doc({
@@ -1335,10 +1472,12 @@ def onboard_tenant(tenant_name=None, phone=None, email=None, national_id=None,
 			"property": property,
 			"unit": unit_name,
 			"tenant": tenant.name,
-			"status": "Active",
+			"status": lease_status,
 			"start_date": start,
 			"end_date": end,
 			"rent_amount": _num(rent),
+			"standard_rent": standard_rent,
+			"discount_amount": discount_amount,
 			"deposit_amount": _num(deposit),
 			# Non-refundable utility deposits: stored as record values only, never
 			# posted to accounting and excluded from the initial amount due / STK total.
@@ -1357,6 +1496,28 @@ def onboard_tenant(tenant_name=None, phone=None, email=None, national_id=None,
 		frappe.db.rollback()
 		raise
 
+	# For a discounted onboarding, raise a maker-checker Approval Request so an
+	# admin / Super Admin / Director must approve before the lease goes Active.
+	approval_request = None
+	if is_discounted:
+		approver_role = None
+		for candidate in ("Super Admin", "Director", "System Manager", "Administrator"):
+			if frappe.db.exists("Role", candidate):
+				approver_role = candidate
+				break
+		req = frappe.get_doc({
+			"doctype": "Approval Request",
+			"organization": organization,
+			"request_type": "Onboarding Discount",
+			"reference_doctype": "Lease Agreement",
+			"reference_name": lease_name,
+			"requested_by": frappe.session.user,
+			"approver_role": approver_role,
+			"status": "Pending",
+		})
+		req.insert(ignore_permissions=True)
+		approval_request = req.name
+
 	# on_update on the lease already marks the unit Occupied for Active leases.
 	# Generate + attach the signed agreement PDF.
 	try:
@@ -1365,7 +1526,15 @@ def onboard_tenant(tenant_name=None, phone=None, email=None, national_id=None,
 		frappe.log_error(title="lease pdf generation failed", message=frappe.get_traceback())
 
 	frappe.db.commit()
-	return {"tenant": tenant.name, "lease_agreement": lease_name}
+	return {
+		"tenant": tenant.name,
+		"lease_agreement": lease_name,
+		"status": lease_status,
+		"is_discounted": is_discounted,
+		"standard_rent": standard_rent,
+		"discount_amount": discount_amount,
+		"approval_request": approval_request,
+	}
 
 
 @frappe.whitelist()
@@ -1481,17 +1650,25 @@ def delete_tenant(tenant):
 
 @frappe.whitelist()
 @envelope
-def my_tenants():
+def my_tenants(page=1, page_size=8, search=None):
 	"""
 	Tenants for the current caretaker: everyone they onboarded (tenant created by
 	this user) OR who holds a lease on one of the caretaker's properties. Admin /
-	unrestricted roles get all tenants. Includes lease + initial payment status
-	and the retry-able lease name when a lease exists.
+	unrestricted roles get all tenants.
+
+	Server-side paginated. Returns {data, pagination:{...}}. Each tenant may hold
+	more than one unit, so `leases` lists every lease (for per-unit retry) while
+	`unit` is a combined label and `rent_amount` the combined rent. `lease` keeps
+	the primary (first) lease name for back-compat with single-lease callers.
 	"""
 	from property_management.api.roles import UNRESTRICTED_ROLES
 	user = frappe.session.user
 	roles = set(frappe.get_roles(user))
 	unrestricted = user == "Administrator" or bool(roles & UNRESTRICTED_ROLES)
+
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 8)))
+	offset = (page - 1) * page_size
 
 	tenant_names = None
 	if not unrestricted:
@@ -1505,42 +1682,91 @@ def my_tenants():
 		created = set(frappe.get_all("Property Tenant", filters={"owner": user}, pluck="name"))
 		tenant_names = list(leased | created)
 		if not tenant_names:
-			return []
+			return {"data": [], "pagination": {"page": 1, "page_size": page_size,
+				"total": 0, "total_pages": 1, "has_next": False, "has_prev": False}}
 
 	t_filters = {}
 	if tenant_names is not None:
 		t_filters["name"] = ["in", tenant_names]
+
+	or_filters = None
+	if search:
+		term = f"%{search}%"
+		or_filters = [
+			["Property Tenant", "tenant_name", "like", term],
+			["Property Tenant", "phone", "like", term],
+			["Property Tenant", "email", "like", term],
+		]
+
+	# Total count (respecting scope + search).
+	if or_filters:
+		total = len(frappe.get_all("Property Tenant", filters=t_filters, or_filters=or_filters, pluck="name"))
+	else:
+		total = frappe.db.count("Property Tenant", t_filters)
+
 	tenants = frappe.get_all(
-		"Property Tenant", filters=t_filters,
+		"Property Tenant", filters=t_filters, or_filters=or_filters,
 		fields=["name", "tenant_name", "phone", "email", "status", "creation"],
 		order_by="creation desc",
+		limit_start=offset, limit_page_length=page_size,
 	)
 
-	# Latest lease per tenant (if any) for unit + payment status.
+	# All leases per tenant on this page (one query), oldest first for stable order.
+	names = [t.name for t in tenants]
+	leases_by_tenant = {}
+	if names:
+		for le in frappe.get_all(
+			"Lease Agreement", filters={"tenant": ["in", names]},
+			fields=["name", "tenant", "property", "unit", "status", "rent_amount",
+					"deposit_amount", "initial_payment_status", "initial_amount_due", "creation"],
+			order_by="creation asc",
+		):
+			leases_by_tenant.setdefault(le.tenant, []).append(le)
+
 	out = []
 	for t in tenants:
-		lease = frappe.get_all(
-			"Lease Agreement", filters={"tenant": t.name},
-			fields=["name", "property", "unit", "status", "rent_amount", "deposit_amount",
-					"initial_payment_status", "initial_amount_due"],
-			order_by="creation desc", limit=1,
-		)
-		l = lease[0] if lease else {}
+		tls = leases_by_tenant.get(t.name, [])
+		primary = tls[0] if tls else {}
+		units = [le.get("unit") for le in tls if le.get("unit")]
 		out.append({
 			"tenant": t.name,
 			"tenant_name": t.tenant_name or t.name,
 			"phone": t.phone or "",
 			"email": t.email or "",
 			"status": t.status or "Active",
-			"lease": l.get("name"),
-			"property": l.get("property"),
-			"unit": l.get("unit"),
-			"rent_amount": l.get("rent_amount"),
-			"initial_amount_due": l.get("initial_amount_due"),
-			"initial_payment_status": l.get("initial_payment_status") or ("—" if not l else "Pending"),
-			"assigned": bool(l),
+			# Primary lease kept for back-compat (single-lease callers / retry button).
+			"lease": primary.get("name"),
+			"property": primary.get("property"),
+			"unit": ", ".join(units),
+			"units_count": len(units),
+			"rent_amount": sum(flt(le.get("rent_amount")) for le in tls),
+			"initial_amount_due": primary.get("initial_amount_due"),
+			"initial_payment_status": primary.get("initial_payment_status") or ("—" if not tls else "Pending"),
+			"assigned": bool(tls),
+			# Full per-unit breakdown so the UI can show/retry each lease.
+			"leases": [{
+				"lease": le.get("name"),
+				"property": le.get("property"),
+				"unit": le.get("unit"),
+				"status": le.get("status"),
+				"rent_amount": flt(le.get("rent_amount")),
+				"initial_payment_status": le.get("initial_payment_status") or "Pending",
+				"initial_amount_due": le.get("initial_amount_due"),
+			} for le in tls],
 		})
-	return out
+
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	return {
+		"data": out,
+		"pagination": {
+			"page": page,
+			"page_size": page_size,
+			"total": total,
+			"total_pages": total_pages,
+			"has_next": page < total_pages,
+			"has_prev": page > 1,
+		},
+	}
 
 
 @frappe.whitelist()
@@ -2260,6 +2486,23 @@ def get_tenant_detail(tenant=None):
 		unit_label = frappe.db.get_value("Property Unit", active.unit, "unit_number") or active.unit or ""
 		property_label = frappe.db.get_value("Property", active.property, "property_name") or active.property or ""
 
+	# Full list of this tenant's leases/units (a tenant may hold more than one),
+	# so the detail surface can show every unit instead of only the primary one.
+	lease_list = []
+	for l in leases:
+		lease_list.append({
+			"lease": l.name,
+			"status": l.status,
+			"unit": l.unit,
+			"unit_label": frappe.db.get_value("Property Unit", l.unit, "unit_number") or l.unit or "",
+			"property": l.property,
+			"property_label": frappe.db.get_value("Property", l.property, "property_name") or l.property or "",
+			"rent_amount": l.rent_amount,
+			"deposit_amount": l.deposit_amount,
+			"is_signed": bool(l.signed_on or (l.tenant_signature and l.caretaker_signature)),
+			"has_lease_pdf": bool(l.agreement_pdf),
+		})
+
 	# Extra (non-ID) document images attached to the tenant.
 	documents = []
 	for f in frappe.get_all(
@@ -2297,6 +2540,8 @@ def get_tenant_detail(tenant=None):
 		"deposit_amount": (active.deposit_amount if active else None),
 		"is_signed": bool(active and (active.signed_on or (active.tenant_signature and active.caretaker_signature))) if active else False,
 		"has_lease_pdf": bool(active and active.agreement_pdf),
+		# Every lease/unit for this tenant (primary one duplicated above for back-compat).
+		"leases": lease_list,
 	}
 
 

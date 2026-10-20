@@ -105,16 +105,52 @@ def create_payment_entry(
 		"property_ref": property_name,
 	})
 
-	# Allocate against the invoice when supplied.
+	# Allocation strategy with overpayment handling:
+	#   1. Allocate to the named invoice up to its outstanding.
+	#   2. Spill any excess onto this customer's OTHER open invoices, oldest first.
+	#   3. Anything still left stays UNALLOCATED on the Payment Entry — ERPNext
+	#      records it as the customer's advance/credit, applicable to future
+	#      invoices. (Nothing is lost; the money sits as a credit on the party.)
+	remaining = flt(amount)
 	if sales_invoice:
 		outstanding = flt(frappe.db.get_value("Sales Invoice", sales_invoice, "outstanding_amount"))
-		allocated = min(flt(amount), outstanding) if outstanding else flt(amount)
-		pe.append("references", {
-			"reference_doctype": "Sales Invoice",
-			"reference_name": sales_invoice,
-			"allocated_amount": allocated,
-		})
+		allocated = min(remaining, outstanding) if outstanding > 0 else 0.0
+		if allocated > 0:
+			pe.append("references", {
+				"reference_doctype": "Sales Invoice",
+				"reference_name": sales_invoice,
+				"allocated_amount": allocated,
+			})
+			remaining -= allocated
 
+		# Spill the excess onto the customer's other open invoices (oldest first).
+		if remaining > 0:
+			other_invoices = frappe.get_all(
+				"Sales Invoice",
+				filters={
+					"docstatus": 1,
+					"customer": customer,
+					"outstanding_amount": [">", 0],
+					"name": ["!=", sales_invoice],
+				},
+				fields=["name", "outstanding_amount"],
+				order_by="due_date asc, posting_date asc",
+			)
+			for inv in other_invoices:
+				if remaining <= 0:
+					break
+				inv_out = flt(inv.outstanding_amount)
+				if inv_out <= 0:
+					continue
+				take = min(remaining, inv_out)
+				pe.append("references", {
+					"reference_doctype": "Sales Invoice",
+					"reference_name": inv.name,
+					"allocated_amount": take,
+				})
+				remaining -= take
+
+	# Any `remaining` is left unallocated -> becomes the customer's advance/credit.
 	pe.flags.ignore_mandatory = True
 	pe.insert(ignore_permissions=True)
 	if submit:

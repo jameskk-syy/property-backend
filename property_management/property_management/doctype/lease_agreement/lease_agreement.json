@@ -15,6 +15,8 @@
   "start_date",
   "end_date",
   "rent_amount",
+  "standard_rent",
+  "discount_amount",
   "deposit_amount",
   "deposit_balance",
   "water_deposit",
@@ -72,7 +74,7 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Status",
-   "options": "Active\nTerminated\nExpired",
+   "options": "Pending Approval\nActive\nTerminated\nExpired",
    "reqd": 1
   },
   {
@@ -96,6 +98,20 @@
    "fieldtype": "Currency",
    "label": "Agreed Rent Amount (KSh)",
    "reqd": 1
+  },
+  {
+   "fieldname": "standard_rent",
+   "fieldtype": "Currency",
+   "label": "Standard Rent (unit base rent, KSh)",
+   "read_only": 1,
+   "description": "The unit's base rent at onboarding. Used to detect a discount."
+  },
+  {
+   "fieldname": "discount_amount",
+   "fieldtype": "Currency",
+   "label": "Discount Amount (KSh)",
+   "read_only": 1,
+   "description": "standard_rent - agreed rent when a discount was granted at onboarding."
   },
   {
    "fieldname": "deposit_amount",

@@ -49,6 +49,10 @@ def initiate_onboarding_payment(lease, phone=None):
 	deposit->liability) and marks the lease paid.
 	"""
 	lease_doc = frappe.get_doc("Lease Agreement", lease)
+	# A discounted onboarding stays "Pending Approval" and must NOT collect money
+	# or post to accounts until an admin/Super Admin approves the discount.
+	if lease_doc.status == "Pending Approval":
+		frappe.throw(_("This lease has a pending discount approval. Collect payment only after it is approved."))
 	rent = flt(lease_doc.rent_amount)
 	deposit = flt(lease_doc.deposit_amount)
 	total = rent + deposit

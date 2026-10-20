@@ -48,8 +48,22 @@ def record_payment(property, amount, sales_invoice=None, tenant=None, payment_me
 		tenant=tenant, payment_method=payment_method, reference_no=reference_no, submit=True,
 	)
 	pe = frappe.db.get_value(
-		"Payment Entry", pe_name, ["name", "paid_amount", "party", "mode_of_payment"], as_dict=True
+		"Payment Entry", pe_name,
+		["name", "paid_amount", "party", "mode_of_payment", "unallocated_amount"],
+		as_dict=True,
 	)
+	# Report how the money was split so the UI can show overpayment handling:
+	# how much landed on invoices vs. how much became a tenant credit/advance.
+	refs = frappe.get_all(
+		"Payment Entry Reference",
+		filters={"parent": pe_name},
+		fields=["reference_name", "allocated_amount"],
+	)
+	allocated_total = sum(flt(r.allocated_amount) for r in refs)
+	unallocated = flt(pe.get("unallocated_amount")) or max(0.0, flt(pe.get("paid_amount")) - allocated_total)
+	pe["allocated_to_invoices"] = allocated_total
+	pe["invoices_paid"] = [r.reference_name for r in refs]
+	pe["advance_credit"] = unallocated  # excess held as the tenant's credit
 	return pe
 
 
@@ -90,14 +104,23 @@ def generate_monthly_invoices(period=None, organization=None, property=None):
 
 @frappe.whitelist()
 @envelope
-def list_expense_categories(active_only=True):
-	"""List Expense Categories for the raise-expense form."""
+def list_expense_categories(active_only=True, caretaker_only=False):
+	"""
+	List Expense Categories for the raise-expense form.
+
+	caretaker_only: when truthy, return ONLY the categories flagged
+	`caretaker_visible` — the limited set a caretaker may raise. Admins call
+	without this flag and get every category.
+	"""
 	filters = {}
 	if active_only in (True, "true", "1", 1):
 		filters["is_active"] = 1
+	if caretaker_only in (True, "true", "1", 1):
+		filters["caretaker_visible"] = 1
 	return frappe.get_all(
 		"Expense Category", filters=filters,
-		fields=["name", "category_name", "account_name"], order_by="category_name asc",
+		fields=["name", "category_name", "account_name", "caretaker_visible"],
+		order_by="category_name asc",
 	)
 
 
@@ -253,6 +276,102 @@ def raise_expense(property, amount, work_description, expense_category=None, ven
 		"property_expense": exp.name,
 		"approval_request": req.name,
 		"status": exp.status,
+	}
+
+
+def _rent_change_approver_role():
+	"""Pick an existing role to route the rent-change approval to."""
+	for candidate in ("Super Admin", "Director", "System Manager", "Administrator"):
+		if frappe.db.exists("Role", candidate):
+			return candidate
+	return None
+
+
+@frappe.whitelist()
+@envelope
+def request_rent_change(lease, new_rent, reason=None):
+	"""
+	Caretaker (or admin) proposes a new rent for a lease. Creates a Rent Change
+	Request in 'Pending Approval' plus a maker-checker Approval Request. The lease's
+	rent is NOT changed here — it only changes when an admin / Super Admin / Director
+	approves the request (Rent Change Request.approve() writes the new rent).
+	"""
+	if not frappe.db.exists("Lease Agreement", lease):
+		frappe.throw("Lease not found.")
+
+	le = frappe.get_doc("Lease Agreement", lease)
+
+	rcr = frappe.get_doc({
+		"doctype": "Rent Change Request",
+		"lease": lease,
+		"property": le.property,
+		"unit": le.unit,
+		"tenant": le.tenant,
+		"organization": le.get("organization"),
+		"current_rent": flt(le.rent_amount),
+		"new_rent": flt(new_rent),
+		"reason": reason,
+		"status": "Pending Approval",
+		"requested_by": frappe.session.user,
+	})
+	rcr.insert(ignore_permissions=True)
+
+	req = frappe.get_doc({
+		"doctype": "Approval Request",
+		"organization": le.get("organization"),
+		"request_type": "Rent Change",
+		"reference_doctype": "Rent Change Request",
+		"reference_name": rcr.name,
+		"requested_by": frappe.session.user,
+		"approver_role": _rent_change_approver_role(),
+		"status": "Pending",
+	})
+	req.insert(ignore_permissions=True)
+
+	return {
+		"rent_change_request": rcr.name,
+		"approval_request": req.name,
+		"status": rcr.status,
+		"current_rent": flt(rcr.current_rent),
+		"new_rent": flt(rcr.new_rent),
+		"discount_amount": flt(rcr.discount_amount),
+	}
+
+
+@frappe.whitelist()
+@envelope
+def list_rent_change_requests(status=None, property=None, page=1, page_size=20):
+	"""List rent change requests (newest first), optionally filtered."""
+	page = max(1, int(page or 1))
+	page_size = min(100, max(1, int(page_size or 20)))
+	offset = (page - 1) * page_size
+
+	filters = {}
+	if status:
+		filters["status"] = status
+	if property:
+		filters["property"] = property
+
+	total = frappe.db.count("Rent Change Request", filters)
+	rows = frappe.get_all(
+		"Rent Change Request", filters=filters,
+		fields=["name", "lease", "property", "unit", "tenant", "current_rent",
+				"new_rent", "discount_amount", "reason", "status",
+				"requested_by", "approved_by", "approved_at", "creation"],
+		order_by="creation desc", limit_start=offset, limit_page_length=page_size,
+	)
+	# Friendly names for display.
+	for r in rows:
+		r["property_name"] = frappe.db.get_value("Property", r["property"], "property_name") if r.get("property") else ""
+		r["tenant_name"] = frappe.db.get_value("Property Tenant", r["tenant"], "tenant_name") if r.get("tenant") else ""
+
+	total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+	return {
+		"data": rows,
+		"pagination": {
+			"page": page, "page_size": page_size, "total": total,
+			"total_pages": total_pages, "has_next": page < total_pages, "has_prev": page > 1,
+		},
 	}
 
 

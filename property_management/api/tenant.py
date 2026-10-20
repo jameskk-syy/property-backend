@@ -90,18 +90,31 @@ def my_lease():
 	if prop.get("caretaker"):
 		caretaker = frappe.db.get_value("Caretaker", prop.caretaker, "caretaker_name") or prop.caretaker
 
+	# All of this tenant's units (a tenant may hold more than one). `leases` lists
+	# each; the top-level fields describe the PRIMARY lease and summarize across
+	# all units (combined unit label + total rent) so single-unit UIs still read
+	# correctly while multi-unit UIs can iterate `leases`.
+	all_leases = my_leases()
+	unit_labels = [l["unit"] for l in all_leases if l.get("unit")]
+	total_rent = sum(flt(l.get("rent")) for l in all_leases)
+
 	return {
 		"lease": le.name,
 		"tenant": tenant,
 		"tenant_name": _tenant_name(tenant),
 		"property": le.property,
 		"property_name": property_name,
+		# Primary unit for back-compat, plus a combined label and the full list.
 		"unit": unit_number,
+		"units_label": ", ".join(unit_labels) if unit_labels else unit_number,
+		"units_count": len(all_leases),
+		"leases": all_leases,
 		"landlord": landlord,
 		"caretaker": caretaker,
 		"lease_start": str(le.start_date) if le.start_date else None,
 		"lease_end": str(le.end_date) if le.end_date else None,
 		"rent": flt(le.rent_amount),
+		"total_rent": total_rent,
 		"deposit": flt(le.deposit_amount),
 		"status": le.status,
 		"initial_payment_status": le.initial_payment_status or "Pending",
@@ -110,6 +123,112 @@ def my_lease():
 			frappe.db.get_value("File", {"attached_to_doctype": "Lease Agreement",
 										  "attached_to_name": le.name, "file_name": ["like", "%.pdf"]}, "name")
 		),
+	}
+
+
+@frappe.whitelist()
+def my_leases():
+	"""
+	ALL of the logged-in tenant's leases (a tenant may hold more than one unit).
+	Each entry carries the unit/property labels, rent and the amount outstanding
+	on that unit's own invoices, so the payment screen can let the tenant choose
+	which unit to pay for. Active leases first, newest first within each group.
+	"""
+	tenant = _current_tenant()
+	leases = frappe.get_all(
+		"Lease Agreement", filters={"tenant": tenant},
+		fields=["name", "property", "unit", "status", "rent_amount", "deposit_amount",
+				"initial_payment_status", "initial_amount_due", "initial_amount_paid", "creation"],
+		order_by="creation desc",
+	)
+	if not leases:
+		return []
+
+	# Resolve friendly labels in bulk.
+	prop_ids = list({l.property for l in leases if l.property})
+	unit_ids = list({l.unit for l in leases if l.unit})
+	prop_names = {p.name: (p.property_name or p.name) for p in frappe.get_all(
+		"Property", filters={"name": ["in", prop_ids]}, fields=["name", "property_name"])} if prop_ids else {}
+	unit_names = {u.name: (u.unit_number or u.name) for u in frappe.get_all(
+		"Property Unit", filters={"name": ["in", unit_ids]}, fields=["name", "unit_number"])} if unit_ids else {}
+
+	# Outstanding per unit from Sales Invoices that reference the lease's unit, when
+	# the invoice carries a unit link; otherwise fall back to the lease's own
+	# initial amount due (keeps a sensible "amount to pay" for migrated leases).
+	out = []
+	# Sort Active first so the default selection is a live unit.
+	leases.sort(key=lambda l: (l.status != "Active", str(l.creation)), reverse=False)
+	for l in leases:
+		unit_outstanding = 0.0
+		try:
+			rows = frappe.get_all(
+				"Sales Invoice",
+				filters={"docstatus": 1, "property_unit": l.unit, "outstanding_amount": [">", 0]},
+				fields=["sum(outstanding_amount) as bal"],
+			)
+			if rows and rows[0].bal:
+				unit_outstanding = flt(rows[0].bal)
+		except Exception:
+			# Sales Invoice may not carry a property_unit field in all installs; the
+			# amount due then falls back to the lease rent / initial amount below.
+			unit_outstanding = 0.0
+		# Default the "amount to pay" to the MONTHLY RENT. Only a real outstanding
+		# invoice balance overrides it. We intentionally do NOT fall back to
+		# initial_amount_due (rent + deposit for onboarding, already settled), so
+		# recurring rent payments charge the monthly rent, not rent+deposit.
+		amount_due = unit_outstanding or flt(l.rent_amount)
+		out.append({
+			"lease": l.name,
+			"property": l.property,
+			"property_name": prop_names.get(l.property, l.property),
+			"unit": unit_names.get(l.unit, l.unit),
+			"unit_id": l.unit,
+			"status": l.status,
+			"rent": flt(l.rent_amount),
+			"deposit": flt(l.deposit_amount),
+			"outstanding": unit_outstanding,
+			"amount_due": amount_due,
+			"initial_payment_status": l.initial_payment_status or "Pending",
+		})
+	return out
+
+
+@frappe.whitelist()
+def my_rent_summary():
+	"""
+	Per-house rent breakdown for the logged-in tenant plus the combined total.
+
+	A tenant may hold more than one unit (house). This returns one row per ACTIVE
+	lease — property, unit, that house's rent and its outstanding balance — plus
+	`total_rent` and `total_outstanding` across all the tenant's houses, so the
+	portal can show "specific rent for each house" and the grand total due.
+	"""
+	leases = my_leases()  # already labelled, with per-unit rent + outstanding
+	houses = []
+	total_rent = 0.0
+	total_outstanding = 0.0
+	for l in leases:
+		if l.get("status") != "Active":
+			continue
+		rent = flt(l.get("rent"))
+		outstanding = flt(l.get("outstanding"))
+		total_rent += rent
+		total_outstanding += outstanding
+		houses.append({
+			"lease": l.get("lease"),
+			"property": l.get("property"),
+			"property_name": l.get("property_name"),
+			"unit": l.get("unit"),
+			"unit_id": l.get("unit_id"),
+			"rent": rent,
+			"outstanding": outstanding,
+			"amount_due": flt(l.get("amount_due")),
+		})
+	return {
+		"houses": houses,
+		"house_count": len(houses),
+		"total_rent": total_rent,
+		"total_outstanding": total_outstanding,
 	}
 
 
@@ -222,6 +341,8 @@ def my_dashboard():
 	return {
 		"tenant_name": name,
 		"lease": lease,
+		# All leases/units so a multi-unit tenant can pick which unit to pay for.
+		"leases": my_leases(),
 		"balance": balance,
 		"recent_payments": payments,
 	}
@@ -332,7 +453,14 @@ def raise_complaint(subject=None, description=None, category=None, priority="Med
 
 	le = _active_lease(tenant)
 	tenant_doc = frappe.get_doc("Property Tenant", tenant)
-	
+
+	# Stamp the property's caretaker so the feedback is explicitly linked to the
+	# concerned caretaker (in addition to being visible via the property). The
+	# landlord sees it through their property ownership.
+	prop = le.property if le else None
+	caretaker = frappe.db.get_value("Property", prop, "caretaker") if prop else None
+	caretaker_name = frappe.db.get_value("Caretaker", caretaker, "caretaker_name") if caretaker else ""
+
 	doc = frappe.get_doc({
 		"doctype": "Tenant Complaint",
 		"raised_by_type": "Tenant",
@@ -340,8 +468,10 @@ def raise_complaint(subject=None, description=None, category=None, priority="Med
 		"tenant": tenant,
 		"tenant_name": tenant_doc.tenant_name or tenant,
 		"mobile_number": tenant_doc.phone or "",
-		"property": le.property if le else None,
+		"property": prop,
 		"unit": le.unit if le else None,
+		"caretaker": caretaker,
+		"caretaker_name": caretaker_name or "",
 		"category": category or "General",
 		"priority": priority or "Medium",
 		"feedback": feedback_text.strip(),

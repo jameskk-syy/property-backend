@@ -8,6 +8,7 @@
  "field_order": [
   "category_name",
   "is_active",
+  "caretaker_visible",
   "column_break_1",
   "account_name",
   "description"
@@ -27,6 +28,14 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Active"
+  },
+  {
+   "default": "0",
+   "fieldname": "caretaker_visible",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Visible to Caretakers",
+   "description": "When ticked, caretakers can pick this category when raising an expense. Admins always see all categories."
   },
   {
    "fieldname": "column_break_1",

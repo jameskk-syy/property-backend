@@ -3,7 +3,7 @@
 
 import frappe
 
-UNRESTRICTED_ROLES = {"Administrator", "System Manager", "Director", "Office", "Office User", "Organization Admin"}
+UNRESTRICTED_ROLES = {"Administrator", "System Manager", "Director", "Office", "Office User", "Organization Admin", "Super Admin"}
 
 
 @frappe.whitelist()
@@ -162,7 +162,10 @@ def get_users_list():
 		# holds every role, so admin/System Manager MUST be checked before the
 		# specialized (landlord/caretaker/tenant) roles, otherwise Administrator
 		# would be mis-detected as a landlord.
-		if u.name == "Administrator" or bool(user_roles & UNRESTRICTED_ROLES):
+		if "Super Admin" in user_roles:
+			# Super Admin: cross-dashboard access to all four workspaces.
+			primary_role = "superadmin"
+		elif u.name == "Administrator" or bool(user_roles & UNRESTRICTED_ROLES):
 			primary_role = "admin"
 		elif "Caretaker" in user_roles:
 			primary_role = "caretaker"
@@ -184,7 +187,7 @@ def get_users_list():
 				pass
 		if modules_list is None:
 			# Admins see everything; specialized roles get a sensible default.
-			if primary_role == "admin":
+			if primary_role in ("admin", "superadmin"):
 				modules_list = all_modules
 			elif primary_role == "caretaker":
 				modules_list = ["Leasing", "Operations"]

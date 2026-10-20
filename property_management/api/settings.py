@@ -20,6 +20,7 @@ _ORG_FIELDS = [
 	"rent_due_day", "late_fee_grace_days", "late_fee_amount",
 	"second_penalty_days", "second_penalty_amount",
 	"garbage_charge", "water_rate_per_unit",
+	"rental_tax_rate",
 ]
 
 # Fields a Property may override (subset of org fields that exist on Property).
@@ -36,14 +37,23 @@ _DEFAULTS = {
 	"second_penalty_amount": 1000,
 	"garbage_charge": 0,
 	"water_rate_per_unit": 150,
+	# Monthly Rental Income tax rate (%). Kenya MRI is 10% of gross rent by
+	# default; override per organization once the Organization field exists.
+	"rental_tax_rate": 10,
 }
 
 
 def _org_settings(organization):
 	settings = dict(_DEFAULTS)
 	if organization:
-		org = frappe.db.get_value("Organization", organization, _ORG_FIELDS, as_dict=True) or {}
-		for k in _ORG_FIELDS:
+		# Only query columns that actually exist on Organization, so newer
+		# settings (e.g. rental_tax_rate) fall back to the default until an
+		# Organization field is added for them.
+		meta = frappe.get_meta("Organization")
+		existing = [f for f in _ORG_FIELDS if meta.has_field(f)]
+		org = frappe.db.get_value("Organization", organization, existing, as_dict=True) if existing else {}
+		org = org or {}
+		for k in existing:
 			if org.get(k) not in (None, ""):
 				settings[k] = org[k]
 	return settings
@@ -82,7 +92,9 @@ def set_billing_settings(organization=None, **kwargs):
 
 	doc = frappe.get_doc("Organization", organization)
 	for k in _ORG_FIELDS:
-		if k in kwargs and kwargs[k] not in (None, ""):
+		# Skip settings that don't yet have an Organization field (e.g. a new
+		# default-only key); writing them would raise.
+		if k in kwargs and kwargs[k] not in (None, "") and doc.meta.has_field(k):
 			doc.set(k, kwargs[k])
 	doc.save(ignore_permissions=True)
 

@@ -34,7 +34,7 @@ class TenantComplaint(Document):
 		
 		# Denormalize caretaker name
 		if self.caretaker and not self.caretaker_name:
-			self.caretaker_name = frappe.db.get_value("Property Caretaker", self.caretaker, "caretaker_name") or self.caretaker
+			self.caretaker_name = frappe.db.get_value("Caretaker", self.caretaker, "caretaker_name") or self.caretaker
 
 	def respond(self, response=None, status=None, user=None):
 		"""Admin/caretaker responds and/or updates the status of feedback."""

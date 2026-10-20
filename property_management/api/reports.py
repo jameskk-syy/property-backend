@@ -167,6 +167,93 @@ def expense_report(property=None, from_date=None, to_date=None):
 
 
 @frappe.whitelist()
+def cost_tracking(year=None, property=None):
+    """
+    Cost-tracking matrix for Financial Reporting: expense CATEGORIES as rows,
+    the 12 calendar months (Jan..Dec) as columns, plus a per-category total and
+    per-month column totals. Categories are EXTRACTED from the real GL expense
+    accounts, so only categories with actual posted spend appear.
+
+    Scoped to a property's cost center when `property` is given; portfolio-wide
+    otherwise. Returns:
+      {
+        "year": 2026,
+        "months": ["Jan", ..., "Dec"],
+        "categories": [ {"category": "Salaries", "monthly": {"Jan": .., ...},
+                         "total": ..} ],
+        "month_totals": {"Jan": .., ...},
+        "grand_total": ..
+      }
+    """
+    from frappe.utils import get_first_day, get_last_day, formatdate
+
+    yr = int(year) if year else getdate(nowdate()).year
+    cost_center = _get_property_cost_center(property)
+
+    # Expense accounts = the categories. Build the month windows for the year.
+    accounts = frappe.get_all(
+        "Account", filters={"root_type": "Expense", "is_group": 0},
+        fields=["name", "account_name"],
+    )
+    name_map = {a.name: a.account_name for a in accounts}
+    if not name_map:
+        return {"year": yr, "months": [], "categories": [], "month_totals": {}, "grand_total": 0.0}
+
+    month_labels = []
+    month_windows = []
+    for m in range(1, 13):
+        ref = getdate(f"{yr}-{m:02d}-01")
+        start = get_first_day(ref)
+        end = get_last_day(ref)
+        label = formatdate(ref, "MMM")
+        month_labels.append(label)
+        month_windows.append((label, str(start), str(end)))
+
+    # One grouped GL query per month (account-level), then pivot into the matrix.
+    # category_name -> {month_label -> amount}
+    matrix = {}
+    month_totals = {lbl: 0.0 for lbl in month_labels}
+    for label, start, end in month_windows:
+        gl_filters = {
+            "account": ["in", list(name_map.keys())],
+            "is_cancelled": 0,
+            "posting_date": ["between", [start, end]],
+        }
+        if cost_center:
+            gl_filters["cost_center"] = cost_center
+        rows = frappe.get_all(
+            "GL Entry", filters=gl_filters,
+            fields=["account", "sum(debit) as d", "sum(credit) as c"], group_by="account",
+        )
+        for r in rows:
+            amt = flt(r.d) - flt(r.c)  # Expense = debit - credit
+            if abs(amt) < 0.005:
+                continue
+            cat = name_map.get(r.account, r.account)
+            matrix.setdefault(cat, {})[label] = matrix.get(cat, {}).get(label, 0.0) + amt
+            month_totals[label] += amt
+
+    # Build output rows (only categories with any activity), sorted by total desc.
+    categories = []
+    for cat, monthly in matrix.items():
+        total = sum(flt(v) for v in monthly.values())
+        if abs(total) < 0.005:
+            continue
+        full = {lbl: flt(monthly.get(lbl, 0.0)) for lbl in month_labels}
+        categories.append({"category": cat, "monthly": full, "total": flt(total)})
+    categories.sort(key=lambda x: x["total"], reverse=True)
+
+    grand_total = sum(c["total"] for c in categories)
+    return {
+        "year": yr,
+        "months": month_labels,
+        "categories": categories,
+        "month_totals": {lbl: flt(month_totals[lbl]) for lbl in month_labels},
+        "grand_total": flt(grand_total),
+    }
+
+
+@frappe.whitelist()
 def payroll_salary_report(property=None, period=None):
     """Aggregates payroll gross salaries, statutory deductions, and net payouts."""
     filters = {}
@@ -927,7 +1014,7 @@ def _income_statement(property, year, months):
             rows.append(_row("item", acc.get("account_name") or acc["name"], vals))
     rows.append(_row("total", "Operating Expenses", {k: v for k, v in op_exp.items() if v}))
 
-    # Revenue after expenses + profit.
+    # Revenue after expenses.
     net = {}
     for m in month_keys:
         n = op_rev.get(m, 0.0) - op_exp.get(m, 0.0)
@@ -937,9 +1024,35 @@ def _income_statement(property, year, months):
     rows.append(_row("total", "Revenue", net))
     rows.append(_row("spacer"))
     rows.append(_row("section", "Financing Costs"))
-    rows.append(_row("total", "Profit Before Tax", net))
+
+    # Profit Before Tax = revenue after operating expenses (no financing costs
+    # posted separately yet, so it equals the net above).
+    pbt = dict(net)
+    rows.append(_row("total", "Profit Before Tax", {k: v for k, v in pbt.items() if v}))
+
+    # Rental Tax (Kenya MRI) — a % of GROSS RENTAL income, deducted to get the
+    # after-tax profit. Rate is configurable via billing settings (default 10%).
+    from property_management.api.settings import _effective_settings
+    try:
+        tax_rate = flt(_effective_settings(property=property).get("rental_tax_rate") or 0)
+    except Exception:
+        tax_rate = 10.0
+    rental_tax = {}
+    for m in month_keys:
+        base = rental_subtotal.get(m, 0.0)  # gross rental income for the month
+        t = base * (tax_rate / 100.0) if base and tax_rate else 0.0
+        if t:
+            rental_tax[m] = t
+    rows.append(_row("item", f"Rental Tax ({tax_rate:g}% of rental income)", rental_tax))
+
+    # Profit (after tax) = Profit Before Tax − Rental Tax.
+    profit = {}
+    for m in month_keys:
+        p = pbt.get(m, 0.0) - rental_tax.get(m, 0.0)
+        if p:
+            profit[m] = p
     rows.append(_row("spacer"))
-    rows.append(_row("grand", "Profit", net))
+    rows.append(_row("grand", "Profit", profit))
 
     return {"id": "income_statement", "title": f"INCOME STATEMENT \u2013 {year} (KShs.)",
             "columns": columns, "rows": rows}
@@ -1199,6 +1312,66 @@ def rent_collection_by_property(months=6):
     return {
         "months": month_labels,
         # Strip cost_center from the public payload; the frontend only needs key/id/name.
+        "properties": [{"key": pm["key"], "id": pm["id"], "name": pm["name"]} for pm in prop_meta],
+        "series": series,
+    }
+
+
+@frappe.whitelist()
+def expense_collection_by_property(months=6):
+    """
+    Monthly expense (GL expense) broken down per property, for a per-property
+    expense table on the admin dashboard. Mirrors rent_collection_by_property so
+    the frontend can render the two tables identically.
+
+    Returns the same shape:
+      {
+        "months": ["Apr", "May", ...],
+        "properties": [{"key": "p_<name>", "id": <property>, "name": <property_name>}],
+        "series": [ {"month": "Apr", "p_<name>": 8000, ...}, ... ]
+      }
+    Expenses are attributed to a property via its cost center (same mechanism as
+    the per-property rent figures), so salaries only appear here once payroll
+    posts to the property cost center.
+    """
+    from frappe.utils import get_first_day, get_last_day
+
+    months = max(1, min(12, int(months or 6)))
+    today = getdate(nowdate())
+
+    props = frappe.get_all(
+        "Property",
+        fields=["name", "property_name", "cost_center"],
+        order_by="property_name asc",
+    )
+    prop_meta = []
+    for p in props:
+        prop_meta.append({
+            "key": f"p_{p.name}",
+            "id": p.name,
+            "name": p.property_name or p.name,
+            "cost_center": p.cost_center,
+        })
+
+    month_labels = []
+    series = []
+    for i in range(months - 1, -1, -1):
+        m_ref = add_months(today, -i)
+        m_start = get_first_day(m_ref)
+        m_end = get_last_day(m_ref)
+        label = formatdate(m_ref, "MMM")
+        month_labels.append(label)
+
+        row = {"month": label, "full_month": formatdate(m_ref, "MMM YYYY")}
+        for pm in prop_meta:
+            amount = 0.0
+            if pm["cost_center"]:
+                amount = _gl_expense(m_start, m_end, cost_center=pm["cost_center"])
+            row[pm["key"]] = flt(amount)
+        series.append(row)
+
+    return {
+        "months": month_labels,
         "properties": [{"key": pm["key"], "id": pm["id"], "name": pm["name"]} for pm in prop_meta],
         "series": series,
     }
